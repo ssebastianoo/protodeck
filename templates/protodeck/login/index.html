@@ -1,0 +1,19 @@
+<title>Login</title>
+<main class="grid min-h-dvh place-items-center bg-zinc-50 px-5">
+  <div class="w-full max-w-sm rounded-2xl bg-white p-7 shadow-sm ring-1 ring-zinc-200">
+    <h1 class="text-xl font-semibold text-zinc-900">Welcome back</h1>
+    <p class="mt-1 text-sm text-zinc-500">Sign in to manage your shipments.</p>
+    <form class="mt-6 space-y-4" onsubmit="event.preventDefault(); location.href='/home/'">
+      <label class="block">
+        <span class="text-sm font-medium text-zinc-700">Email</span>
+        <input type="email" placeholder="you@shop.com" class="mt-1.5 h-11 w-full rounded-xl border border-zinc-300 px-3 text-sm outline-none focus:border-brand focus:ring-2 focus:ring-brand/20">
+      </label>
+      <label class="block">
+        <span class="text-sm font-medium text-zinc-700">Password</span>
+        <input type="password" placeholder="••••••••" class="mt-1.5 h-11 w-full rounded-xl border border-zinc-300 px-3 text-sm outline-none focus:border-brand focus:ring-2 focus:ring-brand/20">
+      </label>
+      <button class="h-11 w-full rounded-xl bg-brand text-sm font-medium text-white hover:opacity-90">Sign in</button>
+    </form>
+    <p class="mt-5 text-center text-sm text-zinc-500">New here? <a href="#" class="font-medium text-brand">Create an account</a></p>
+  </div>
+</main>

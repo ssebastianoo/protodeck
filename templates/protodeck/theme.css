@@ -1,0 +1,5 @@
+/* Tailwind v4 theme for the prototype. Tokens defined here become utilities, e.g. bg-brand. */
+@theme {
+  --color-brand: #4f46e5;
+  --color-brand-foreground: #ffffff;
+}

@@ -1,0 +1,5 @@
+node_modules
+dist
+bin
+src/assets.generated.ts
+.DS_Store
