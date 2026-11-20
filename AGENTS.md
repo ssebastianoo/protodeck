@@ -38,7 +38,7 @@ Manual check: `node dist/cli.js init` and then `node dist/cli.js --agent none` i
   - Keep the path traversal check on file serving.
   - The default bind address stays `127.0.0.1`.
 - **Gallery frames do not open their own SSE connection.** Browsers cap HTTP/1.1 connections per host, so `client.js` connects only when it is not inside the gallery, and the gallery reloads its iframes itself. Keep it that way.
-- **Gallery ↔ frame communication uses `postMessage`** with `protodeck:*` message types (`ready`, `focus`, `pick`, `picked`, `highlight`, `refresh`, `cancel`). Update both `gallery.js` and `client.js` when changing a message.
+- **Gallery ↔ frame communication uses `postMessage`** with `protodeck:*` message types (`ready`, `focus`, `pick`, `picked`, `highlight`, `refresh`, `cancel`, `theme`, plus `zoom`, `key` and `gesture`, which client.js forwards so canvas zoom works over frames). Update both `gallery.js` and `client.js` when changing a message.
 - **Component markers:** expanded components are wrapped in `<!--x:name-->…<!--/x:name-->`. The picker uses them to tell the agent which component file renders an element, so keep them if you change the expansion.
 - **Agent output formats:** `claude` uses `--output-format stream-json`, and the session id is kept for `--resume`. `codex exec --json` handles both the current `item.*` events and the older `msg` events. Check the CLIs' current output before changing these parsers.
 - Device definitions are the `DEVICES` list in `ui/gallery.js`.

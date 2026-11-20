@@ -30,11 +30,22 @@
   };
 
   // User-defined sizes, stored per browser: { id, name, w, h }.
+  const SIZE_MIN = 100;
+  const SIZE_MAX = 4000;
   let customDevices = (() => {
     const list = store.get("customDevices", []);
-    return Array.isArray(list)
-      ? list.filter((d) => d && typeof d.id === "string" && d.w > 0 && d.h > 0).map((d) => ({ id: d.id, name: String(d.name || `${d.w}×${d.h}`), w: d.w, h: d.h, type: "custom", custom: true }))
-      : [];
+    if (!Array.isArray(list)) return [];
+    const seen = new Set();
+    const out = [];
+    for (const d of list) {
+      if (!d || typeof d.id !== "string" || !/^custom-[\w-]+$/.test(d.id) || seen.has(d.id)) continue;
+      const w = Math.round(Number(d.w));
+      const h = Math.round(Number(d.h));
+      if (!(w >= SIZE_MIN && w <= SIZE_MAX && h >= SIZE_MIN && h <= SIZE_MAX)) continue;
+      seen.add(d.id);
+      out.push({ id: d.id, name: String(d.name || `Custom ${w}×${h}`).slice(0, 60), w, h, type: "custom", custom: true });
+    }
+    return out;
   })();
   let DEVICES = [...BUILTIN_DEVICES, ...customDevices];
 
@@ -329,13 +340,13 @@
       e.preventDefault();
       const w = Math.round(Number(form.elements.w.value));
       const h = Math.round(Number(form.elements.h.value));
-      if (!(w >= 100 && w <= 4000 && h >= 100 && h <= 4000)) {
+      if (!(w >= SIZE_MIN && w <= SIZE_MAX && h >= SIZE_MIN && h <= SIZE_MAX)) {
         const err = form.querySelector(".err");
         err.textContent = "Width and height must be between 100 and 4000 px.";
         err.hidden = false;
         return;
       }
-      const name = form.elements.name.value.trim() || `Custom ${w}×${h}`;
+      const name = form.elements.name.value.trim().slice(0, 60) || `Custom ${w}×${h}`;
       const d = { id: "custom-" + Date.now().toString(36), name, w, h, type: "custom", custom: true };
       customDevices.push(d);
       saveCustomDevices();
@@ -353,6 +364,13 @@
 
   function renderDevicesMenu() {
     const menu = $("devicesMenu");
+    // Live reload re-renders this menu; keep what was typed in the custom size form.
+    const oldForm = menu.querySelector(".custom-form");
+    const draft = oldForm && {
+      values: { name: oldForm.elements.name.value, w: oldForm.elements.w.value, h: oldForm.elements.h.value },
+      focused: oldForm.contains(document.activeElement) ? document.activeElement.name : null,
+      err: oldForm.querySelector(".err").hidden ? "" : oldForm.querySelector(".err").textContent,
+    };
     menu.textContent = "";
     for (const d of DEVICES) {
       if (d === customDevices[0]) menu.appendChild(el("div", "sep"));
@@ -379,7 +397,11 @@
     if (state.addingDevice) {
       const form = customDeviceForm();
       menu.appendChild(form);
-      if (!menu.hidden) requestAnimationFrame(() => form.elements.w.focus());
+      if (draft) {
+        for (const k in draft.values) form.elements[k].value = draft.values[k];
+        if (draft.err) Object.assign(form.querySelector(".err"), { textContent: draft.err, hidden: false });
+        if (draft.focused) form.elements[draft.focused].focus();
+      } else if (!menu.hidden) requestAnimationFrame(() => form.elements.w.focus());
     } else {
       const add = el("button", "menu-item", { type: "button", role: "menuitem" });
       add.innerHTML = '<svg class="check" style="visibility:visible;color:var(--muted)" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 3v10M3 8h10" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg><span class="name">Add custom size…</span>';
@@ -518,6 +540,12 @@
 
   window.addEventListener("message", (e) => {
     if (e.origin !== location.origin || !e.data || typeof e.data.type !== "string") return;
+    // Zoom input comes from screen and component frames alike.
+    if (e.data.type === "protodeck:zoom" || e.data.type === "protodeck:key" || e.data.type === "protodeck:gesture") {
+      const src = [...document.querySelectorAll("iframe")].find((f) => f.contentWindow === e.source);
+      if (src) onFrameZoom(src, e.data);
+      return;
+    }
     const frame = [...state.frames.keys()].find((f) => f.contentWindow === e.source);
     if (!frame) return;
     const info = state.frames.get(frame);
@@ -549,15 +577,7 @@
       case "protodeck:cancel":
         setPicking(false);
         break;
-      case "protodeck:zoom": {
-        const r = frame.getBoundingClientRect();
-        const k = frame.offsetWidth ? r.width / frame.offsetWidth : 1;
-        wheelZoom(Number(d.deltaY) || 0, Number(d.deltaMode) || 0, r.left + d.x * k, r.top + d.y * k);
-        break;
-      }
-      case "protodeck:key":
-        zoomKey(d.key);
-        break;
+
     }
   });
 
@@ -678,7 +698,8 @@
     }
     state.size = size;
     $("zoom").value = size;
-    store.set("size", size);
+    clearTimeout(zoomTo.saveTimer);
+    zoomTo.saveTimer = setTimeout(() => store.set("size", state.size), 250);
     relayoutAll();
     if (anchor && anchor.isConnected) {
       const r = anchor.querySelector(".sizer").getBoundingClientRect();
@@ -702,6 +723,25 @@
     return true;
   }
 
+  // Pinch state shared by the canvas and frames, so Safari's gesture events and any ctrl+wheel it also sends don't zoom twice.
+  const gesture = { active: false, base: 0 };
+  function gestureZoom(phase, scale, x, y) {
+    if (phase === "start") Object.assign(gesture, { active: true, base: state.size });
+    else if (phase === "change" && gesture.active) zoomTo(gesture.base * scale, x, y);
+    else if (phase === "end") gesture.active = false;
+  }
+
+  /** Zoom input forwarded by client.js from inside a frame; coordinates are the frame's own. */
+  function onFrameZoom(frame, d) {
+    const r = frame.getBoundingClientRect();
+    const k = frame.offsetWidth ? r.width / frame.offsetWidth : 1;
+    const x = r.left + (Number(d.x) || 0) * k;
+    const y = r.top + (Number(d.y) || 0) * k;
+    if (d.type === "protodeck:key") zoomKey(d.key);
+    else if (d.type === "protodeck:gesture") gestureZoom(d.phase, Number(d.scale) || 1, x, y);
+    else if (!gesture.active) wheelZoom(Number(d.deltaY) || 0, Number(d.deltaMode) || 0, x, y);
+  }
+
   const isTyping = (t) => !!(t && t.closest && t.closest("input, textarea, select, [contenteditable=''], [contenteditable='true']"));
 
   function initCanvas() {
@@ -715,21 +755,16 @@
       (e) => {
         if (!e.ctrlKey && !e.metaKey) return;
         e.preventDefault();
-        wheelZoom(e.deltaY, e.deltaMode, e.clientX, e.clientY);
+        if (!gesture.active) wheelZoom(e.deltaY, e.deltaMode, e.clientX, e.clientY);
       },
       { passive: false },
     );
     // Safari reports pinches as gesture events instead of ctrl+wheel.
-    let gestureStart = 0;
-    canvas.addEventListener("gesturestart", (e) => {
-      e.preventDefault();
-      gestureStart = state.size;
-    });
-    canvas.addEventListener("gesturechange", (e) => {
-      e.preventDefault();
-      zoomTo(gestureStart * e.scale, e.clientX, e.clientY);
-    });
-    canvas.addEventListener("gestureend", (e) => e.preventDefault());
+    for (const phase of ["start", "change", "end"])
+      canvas.addEventListener("gesture" + phase, (e) => {
+        e.preventDefault();
+        gestureZoom(phase, e.scale, e.clientX, e.clientY);
+      });
 
     // Drag to pan: on the background, with the middle button, or anywhere while Space is held.
     let space = false;
@@ -740,7 +775,9 @@
     };
     canvas.addEventListener("pointerdown", (e) => {
       const onBackground = !e.target.closest("figure, .component-card, a, button, .screen-head, .empty");
-      if (!(space || e.button === 1 || (e.button === 0 && onBackground))) return;
+      // Middle-click on a link still opens it in a new tab.
+      const middle = e.button === 1 && !e.target.closest("a");
+      if (!(space || middle || (e.button === 0 && onBackground))) return;
       e.preventDefault();
       drag = { id: e.pointerId, x: e.clientX, y: e.clientY };
       canvas.setPointerCapture(e.pointerId);
@@ -773,11 +810,6 @@
         if (e.target.closest && e.target.closest("button, a, [role=button]")) return;
         e.preventDefault();
         if (!e.repeat) setSpace(true);
-        return;
-      }
-      if (zoomKeyMatches(e.key)) {
-        e.preventDefault();
-        zoomKey(e.key);
         return;
       }
       const step = e.shiftKey ? 400 : 80;

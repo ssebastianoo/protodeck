@@ -41,7 +41,7 @@ Use it in a screen as `<x-card title="Plan">…</x-card>` or `<x-card />`. Attri
 - **Zoom:** pinch, Ctrl/⌘ + scroll, ⌘ + `+`/`-`, or the slider. ⌘ + `0` resets.
 - **Devices:** pick frames from the Devices menu, or add your own width and height with "Add custom size…". Custom sizes are saved in the browser.
 - **View:** show or hide the components section (hidden by default) and switch between same-height and true relative frame sizes.
-- **Light and dark:** the button at the top right switches the gallery and the previews. Screens follow it through Tailwind's `dark:` variant (a `data-theme` attribute on `<html>`).
+- **Light and dark:** the button at the top right switches the gallery and the previews. Screens follow it through Tailwind's `dark:` variant (a `data-protodeck-theme` attribute on `<html>`). Screens that use `dark:` classes also get the native dark color scheme for form controls and scrollbars.
 
 ## Chat bar
 
