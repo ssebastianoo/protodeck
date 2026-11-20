@@ -303,7 +303,7 @@ export class ProtoServer {
         const c = url.searchParams.get("name") ?? "";
         const src = this.loadComponent(c);
         if (src === undefined) return this.send(res, 404, "text/plain", "Unknown component");
-        const page = `<title>${c}</title><body class="min-h-screen grid place-items-center p-8 bg-neutral-50"><div>${src.replace(/\{\{\s*([\w-]+)\s*\|([^}]*)\}\}/g, "$2").replace(/\{\{\s*([\w-]+)\s*\}\}/g, "$1")}</div></body>`;
+        const page = `<title>${c}</title><body class="min-h-screen grid place-items-center p-8 bg-neutral-50 dark:bg-neutral-900"><div>${src.replace(/\{\{\s*([\w-]+)\s*\|([^}]*)\}\}/g, "$2").replace(/\{\{\s*([\w-]+)\s*\}\}/g, "$1")}</div></body>`;
         return this.send(res, 200, MIME[".html"], this.render(page));
       }
       case "base.css":

@@ -28,8 +28,26 @@
     } catch {}
   });
 
+  // ---------- theme (data-theme on <html> drives Tailwind's dark: variant) ----------
+  // Pages that use dark: classes also get the native dark color scheme (form controls, scrollbars, canvas).
+  let theme = document.documentElement.getAttribute("data-protodeck-theme") === "dark" ? "dark" : "light";
+  const paintScheme = () => {
+    const root = document.documentElement;
+    if (theme === "dark" && document.querySelector('[class*="dark:"]')) root.setAttribute("data-protodeck-scheme", "dark");
+    else root.removeAttribute("data-protodeck-scheme");
+  };
+  const setTheme = (t) => {
+    theme = t === "dark" ? "dark" : "light";
+    document.documentElement.setAttribute("data-protodeck-theme", theme);
+    paintScheme();
+  };
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", paintScheme, { once: true });
+  else paintScheme();
+
   // ---------- live reload (standalone tabs only; the gallery reloads its frames itself) ----------
   if (!inGallery) {
+    const mq = matchMedia("(prefers-color-scheme: dark)");
+    mq.addEventListener("change", () => setTheme(mq.matches ? "dark" : "light"));
     const es = new EventSource("/__protodeck/events");
     let down = false;
     es.addEventListener("change", (e) => {
@@ -190,9 +208,33 @@
     "keydown",
     (e) => {
       if (e.key === "Escape" && picking) send({ type: "protodeck:cancel" });
+      // Canvas zoom shortcuts work while a frame has focus too.
+      if ((e.metaKey || e.ctrlKey) && !e.altKey && ["=", "+", "-", "_", "0"].includes(e.key)) {
+        e.preventDefault();
+        send({ type: "protodeck:key", key: e.key, mod: true });
+      }
     },
     true
   );
+
+  // Pinch and Ctrl/⌘ + wheel over a frame zoom the gallery canvas instead of the page, as they do over the background.
+  let gesturing = false;
+  window.addEventListener(
+    "wheel",
+    (e) => {
+      if (!e.ctrlKey && !e.metaKey) return;
+      e.preventDefault();
+      if (!gesturing) send({ type: "protodeck:zoom", deltaY: e.deltaY, deltaMode: e.deltaMode, x: e.clientX, y: e.clientY });
+    },
+    { passive: false }
+  );
+  // Safari reports pinches as gesture events, which don't reach the parent page on their own.
+  for (const phase of ["start", "change", "end"])
+    window.addEventListener("gesture" + phase, (e) => {
+      e.preventDefault();
+      gesturing = phase !== "end";
+      send({ type: "protodeck:gesture", phase, scale: e.scale, x: e.clientX, y: e.clientY });
+    });
 
   const follow = () => {
     if (selected) place(selectBox, selected.isConnected ? selected : null);
@@ -213,6 +255,8 @@
         hovered = null;
         place(hoverBox, null);
       }
+    } else if (d.type === "protodeck:theme") {
+      setTheme(d.theme);
     } else if (d.type === "protodeck:highlight") {
       if (!d.selector) {
         selected = null;

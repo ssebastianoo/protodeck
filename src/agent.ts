@@ -123,7 +123,7 @@ export function buildPrompt(ctx: ChatContext, protoRel: string): string {
   const lines = [
     "You are editing an HTML design prototype through the protodeck prototype server.",
     `The prototype lives in ${protoRel}/: one folder per screen with an index.html, and reusable components in ${protoRel}/components/<name>.html used as <x-name attr="..."> tags (fill with {{attr}} / {{attr | default}}, children go into <slot></slot>).`,
-    "Tailwind CSS v4, a CSS reset, the Inter font and live reload are injected automatically: never add <script>, <link> or CDN imports for them, and do not start or restart the server.",
+    "Tailwind CSS v4, a CSS reset, the Inter font and live reload are injected automatically: never add <script>, <link> or CDN imports for them, and do not start or restart the server. Tailwind's dark: variant follows the gallery's light/dark toggle.",
     `Only edit files inside ${protoRel}/. The browser reloads by itself when you save.`,
     "",
   ];

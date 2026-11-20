@@ -130,6 +130,15 @@ export interface InjectOptions {
   theme?: string;
 }
 
+/**
+ * Sets data-protodeck-theme on <html> before first paint, so `dark:` utilities apply without a flash.
+ * Inside the gallery it follows the gallery's theme toggle, otherwise the system setting.
+ */
+const THEME_SCRIPT =
+  `<script>(function(){var t;try{if(window.parent!==window)t=window.parent.__protodeckTheme}catch(e){}` +
+  `if(t!=="dark"&&t!=="light")t=matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light";` +
+  `document.documentElement.setAttribute("data-protodeck-theme",t)})()</script>`;
+
 /** Builds the tags injected at the top of every screen's <head>. */
 export function headTags(opts: InjectOptions): string {
   const v = encodeURIComponent(opts.version);
@@ -138,7 +147,9 @@ export function headTags(opts: InjectOptions): string {
     `<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">` +
     `<link rel="stylesheet" href="/__protodeck/base.css?v=${v}">` +
     `<script src="/__protodeck/tailwind.js?v=${v}"></script>` +
-    `<style type="text/tailwindcss">@theme { --font-sans: "Inter Variable", "Inter", ui-sans-serif, system-ui, sans-serif; }</style>` +
+    `<style type="text/tailwindcss">@theme { --font-sans: "Inter Variable", "Inter", ui-sans-serif, system-ui, sans-serif; }\n@custom-variant dark (&:where([data-protodeck-theme=dark], [data-protodeck-theme=dark] *, .dark, .dark *));</style>` +
+    `<style>:where(html[data-protodeck-scheme=dark]){color-scheme:dark;background-color:Canvas}</style>` +
+    THEME_SCRIPT +
     theme +
     `<script src="/__protodeck/client.js?v=${v}" defer></script>`
   );

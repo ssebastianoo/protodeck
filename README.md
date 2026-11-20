@@ -35,6 +35,14 @@ Every HTML file gets Tailwind, a base reset, the Inter font and the live reload 
 
 Use it in a screen as `<x-card title="Plan">…</x-card>` or `<x-card />`. Attributes fill `{{name}}` (with an optional `| fallback`), and children go into `<slot></slot>`. Components can use other components.
 
+## Gallery
+
+- **Move around:** scroll or swipe with two fingers to pan, drag the background, or hold Space and drag. Arrow keys pan too (Shift for bigger steps).
+- **Zoom:** pinch, Ctrl/⌘ + scroll, ⌘ + `+`/`-`, or the slider. ⌘ + `0` resets.
+- **Devices:** pick frames from the Devices menu, or add your own width and height with "Add custom size…". Custom sizes are saved in the browser.
+- **View:** show or hide the components section (hidden by default) and switch between same-height and true relative frame sizes.
+- **Light and dark:** the button at the top right switches the gallery and the previews. Screens follow it through Tailwind's `dark:` variant (a `data-protodeck-theme` attribute on `<html>`). Screens that use `dark:` classes also get the native dark color scheme for form controls and scrollbars.
+
 ## Chat bar
 
 The bar at the bottom of the gallery sends an instruction to your agent along with:
@@ -62,6 +70,7 @@ Pass extra flags with `--agent-args "--max-turns 20"`.
 protodeck [dir]              Serve the prototype folder (default ./protodeck)
 protodeck init [dir]         Create a starter prototype and install the skill
 protodeck skill [--global]   Install the skill into .claude/skills and .agents/skills
+protodeck kill [port]        Stop servers left running in the background (all, or the one on [port])
 
 -p, --port <n>       default 4321 (the next free port is used if it is taken)
 --host <host>        default 127.0.0.1
@@ -69,6 +78,8 @@ protodeck skill [--global]   Install the skill into .claude/skills and .agents/s
 --agent-args <args>  extra args for claude/codex
 -o, --open           open the browser
 ```
+
+If an agent started the server in the background and it is still running, `protodeck kill` stops it. Pass a port to stop only that one.
 
 ## The skill
 
