@@ -17,7 +17,16 @@
     <span>protodeck</span>
     <span class="muted" id="summary"></span>
   </div>
-  <div class="devices" id="devices" role="group" aria-label="Devices"></div>
+  <div class="pickers">
+    <div class="picker">
+      <button type="button" class="picker-btn" id="routesBtn" aria-haspopup="true" aria-expanded="false" aria-controls="routesMenu"><span class="muted">Routes</span><span class="picker-val" id="routesLabel"></span><svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+      <div class="picker-menu" id="routesMenu" role="menu" aria-label="Routes" hidden></div>
+    </div>
+    <div class="picker">
+      <button type="button" class="picker-btn" id="devicesBtn" aria-haspopup="true" aria-expanded="false" aria-controls="devicesMenu"><span class="muted">Devices</span><span class="picker-val" id="devicesLabel"></span><svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+      <div class="picker-menu" id="devicesMenu" role="menu" aria-label="Devices" hidden></div>
+    </div>
+  </div>
   <div class="tools">
     <label class="zoom" title="Frame size">
       <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M7 2a5 5 0 1 0 3.1 8.9l3.5 3.5 1-1-3.5-3.5A5 5 0 0 0 7 2Zm0 1.5a3.5 3.5 0 1 1 0 7 3.5 3.5 0 0 1 0-7Z" fill="currentColor"/></svg>

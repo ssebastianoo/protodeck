@@ -35,6 +35,10 @@
     enabled: new Set(store.get("devices", DEVICES.filter((d) => d.on).map((d) => d.id))),
     size: store.get("size", 560),
     sameHeight: store.get("sameHeight", true),
+    routes: (() => {
+      const r = store.get("routes", null);
+      return Array.isArray(r) && r.length ? new Set(r) : null; // null = all routes
+    })(),
     current: null, // { screen, device }
     selection: null, // { screen, device, selector, html, components }
     picking: false,
@@ -155,21 +159,29 @@
     for (const f of root.querySelectorAll("iframe")) state.frames.delete(f);
   }
 
+  // Screens shown on the canvas: all of them, or the chosen routes that still exist.
+  function visibleScreens() {
+    if (!state.routes) return state.screens;
+    const picked = state.screens.filter((s) => state.routes.has(s.path));
+    return picked.length ? picked : state.screens;
+  }
+
   function renderScreens(full) {
     const host = $("screens");
+    const shown = visibleScreens();
     if (full) {
       forgetFrames(host);
       host.textContent = "";
     }
     const existing = new Map([...host.children].map((n) => [n.dataset.path, n]));
-    const wanted = new Set(state.screens.map((s) => s.path));
+    const wanted = new Set(shown.map((s) => s.path));
     for (const [path, node] of existing)
       if (!wanted.has(path)) {
         forgetFrames(node);
         node.remove();
       }
     let prev = null;
-    for (const s of state.screens) {
+    for (const s of shown) {
       let node = existing.get(s.path);
       if (!node || !node.isConnected) {
         node = buildScreenRow(s);
@@ -184,9 +196,10 @@
       prev = node;
     }
     $("empty").hidden = state.screens.length > 0;
-    $("summary").textContent = `${state.screens.length} screen${state.screens.length === 1 ? "" : "s"}`;
-    if (!state.current || !state.screens.some((s) => s.path === state.current.screen)) {
-      const first = state.screens[0];
+    const n = state.screens.length;
+    $("summary").textContent = shown.length < n ? `${shown.length} of ${n} screens` : `${n} screen${n === 1 ? "" : "s"}`;
+    if (!state.current || !shown.some((s) => s.path === state.current.screen)) {
+      const first = shown[0];
       const dev = DEVICES.find((d) => state.enabled.has(d.id));
       state.current = first && dev ? { screen: first.path, device: dev.id } : null;
     } else if (!state.enabled.has(state.current.device)) {
@@ -194,6 +207,7 @@
       state.current = dev ? { screen: state.current.screen, device: dev.id } : null;
     }
     paintCurrent();
+    renderPickers();
   }
 
   function renderComponents() {
@@ -217,23 +231,102 @@
     for (const fig of document.querySelectorAll("#screens figure")) layoutFigure(fig);
   }
 
-  function renderDeviceToggles() {
-    const host = $("devices");
-    host.textContent = "";
+  // ---------- routes & devices dropdowns ----------
+  function menuItem(label, hint, checked, onClick) {
+    const b = el("button", "menu-item", { type: "button", role: "menuitemcheckbox", "aria-checked": String(checked) });
+    b.innerHTML = CHECK + '<span class="name"></span>';
+    b.querySelector(".name").textContent = label;
+    if (hint) {
+      const h = el("span", "hint");
+      h.textContent = hint;
+      b.appendChild(h);
+    }
+    b.addEventListener("click", onClick);
+    return b;
+  }
+
+  function setRoutes(set) {
+    state.routes = set && set.size && set.size < state.screens.length ? set : null;
+    store.set("routes", state.routes ? [...state.routes] : null);
+    renderScreens(false);
+    if (state.selection && !visibleScreens().some((s) => s.path === state.selection.screen)) clearSelection();
+  }
+
+  function renderRoutesMenu() {
+    const menu = $("routesMenu");
+    const shown = new Set(visibleScreens().map((s) => s.path));
+    const all = shown.size === state.screens.length;
+    menu.textContent = "";
+    menu.appendChild(menuItem("All routes", String(state.screens.length), all, () => setRoutes(null)));
+    if (state.screens.length) menu.appendChild(el("div", "sep"));
+    for (const s of state.screens) {
+      const on = !all && shown.has(s.path);
+      menu.appendChild(
+        menuItem(s.title, "/" + s.path, on, () => {
+          // From "all", picking a route shows just that route; after that, clicks add or remove routes.
+          const next = all ? new Set() : new Set(shown);
+          if (on) next.delete(s.path);
+          else next.add(s.path);
+          setRoutes(next);
+        }),
+      );
+    }
+    const label = $("routesLabel");
+    if (all) label.textContent = "All";
+    else if (shown.size === 1) label.textContent = visibleScreens()[0].title;
+    else label.textContent = `${shown.size} routes`;
+    $("routesBtn").title = all ? "Showing all routes" : visibleScreens().map((s) => "/" + s.path).join("\n");
+  }
+
+  function renderDevicesMenu() {
+    const menu = $("devicesMenu");
+    menu.textContent = "";
     for (const d of DEVICES) {
-      const b = el("button", "", { type: "button", "aria-pressed": String(state.enabled.has(d.id)), title: `${d.w}×${d.h}` });
-      b.textContent = d.name;
-      b.addEventListener("click", () => {
-        if (state.enabled.has(d.id)) {
-          if (state.enabled.size === 1) return;
-          state.enabled.delete(d.id);
-        } else state.enabled.add(d.id);
+      const on = state.enabled.has(d.id);
+      const b = menuItem(d.name, `${d.w}×${d.h}`, on, () => {
+        if (on) state.enabled.delete(d.id);
+        else state.enabled.add(d.id);
         store.set("devices", [...state.enabled]);
-        renderDeviceToggles();
         renderScreens(true);
       });
-      host.appendChild(b);
+      if (on && state.enabled.size === 1) b.disabled = true;
+      menu.appendChild(b);
     }
+    const on = DEVICES.filter((d) => state.enabled.has(d.id));
+    $("devicesLabel").textContent = on.length === 1 ? on[0].name : on.length === DEVICES.length ? "All" : `${on.length} devices`;
+    $("devicesBtn").title = on.map((d) => d.name).join("\n");
+  }
+
+  function renderPickers() {
+    renderRoutesMenu();
+    renderDevicesMenu();
+  }
+
+  const PICKERS = ["routes", "devices"];
+  function openPicker(id) {
+    for (const p of PICKERS) {
+      const open = p === id;
+      $(p + "Menu").hidden = !open;
+      $(p + "Btn").setAttribute("aria-expanded", String(open));
+    }
+  }
+
+  function initPickers() {
+    for (const p of PICKERS)
+      $(p + "Btn").addEventListener("click", () => openPicker($(p + "Menu").hidden ? p : null));
+    document.addEventListener("pointerdown", (e) => {
+      if (!e.target.closest || !e.target.closest(".picker")) openPicker(null);
+    });
+    document.addEventListener("keydown", (e) => {
+      if (e.key !== "Escape") return;
+      const open = PICKERS.find((p) => !$(p + "Menu").hidden);
+      if (open) {
+        openPicker(null);
+        $(open + "Btn").focus();
+      }
+    });
+    window.addEventListener("blur", () => openPicker(null));
+    renderPickers();
   }
 
   // ---------- current target & selection ----------
@@ -697,7 +790,7 @@
       paintMode();
       relayoutAll();
     });
-    renderDeviceToggles();
+    initPickers();
 
     if (!AGENTS.length) {
       $("composer").querySelector(".row").innerHTML =
