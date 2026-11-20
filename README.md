@@ -44,14 +44,17 @@ The bar at the bottom of the gallery sends an instruction to your agent along wi
 
 The agent edits the files in `protodeck/` and the frames reload by themselves. Everything runs locally: the server spawns the agent in the folder that contains `protodeck/`.
 
+Pick the agent, model and reasoning level from the selector in the bar. It lists every installed agent: Claude Code (Default, Opus, Sonnet, Haiku, Fable, passed as `--model` and `--effort`) and Codex (the models in its local cache, passed as `--model` and `model_reasoning_effort`). "Default" leaves the agent's own setting alone. Use **+** to start a new conversation. Switching to a different agent also starts one.
+
 | `--agent` | What runs |
 | --- | --- |
-| `claude` (default if installed) | `claude -p … --output-format stream-json --permission-mode acceptEdits`. The conversation continues until you click **New chat**. |
+| `claude` (default if installed) | `claude -p … --output-format stream-json --permission-mode acceptEdits`. The conversation continues until you start a new chat. |
 | `codex` | `codex exec --json --full-auto …`. Each instruction starts a fresh run. |
-| `"cmd … {prompt}"` | Any CLI. `{prompt}` is replaced with the full prompt (it is appended if missing). Its stdout is shown as text. |
+| `"cmd … {prompt}"` | Any CLI, listed first in the selector. `{prompt}` is replaced with the full prompt (it is appended if missing). Its stdout is shown as text. |
 | `none` | Gallery only. |
 
-Pass extra flags with `--agent-args "--model sonnet"`.
+`--agent` sets which agent is selected by default.
+Pass extra flags with `--agent-args "--max-turns 20"`.
 
 ## CLI
 

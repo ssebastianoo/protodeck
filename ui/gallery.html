@@ -46,9 +46,16 @@
       <button type="button" class="chip" id="targetChip" title="Screen and device the instruction refers to. Click a frame to change it."></button>
       <span class="chip chip-el" id="elementChip" hidden><span id="elementLabel"></span><button type="button" id="clearElement" aria-label="Clear selected element">×</button></span>
       <span class="spacer"></span>
-      <span class="status" id="status"></span>
+      <span class="status" id="status" hidden></span>
       <button type="button" class="link" id="toggleLog" hidden>History</button>
-      <button type="button" class="link" id="newChat" title="Start a new conversation with the agent">New chat</button>
+      <button type="button" class="model-btn" id="modelBtn" aria-haspopup="dialog" aria-expanded="false" aria-controls="modelMenu" title="Choose agent, model and reasoning">
+        <span class="mark" id="modelMark" aria-hidden="true"></span>
+        <span class="model-label" id="modelLabel"></span>
+        <svg viewBox="0 0 16 16" width="12" height="12" aria-hidden="true"><path d="M4 10l4-4 4 4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>
+      <button type="button" class="icon-btn icon-sm" id="newChat" title="New chat" aria-label="New chat">
+        <svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true"><path d="M8 3v10M3 8h10" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+      </button>
     </div>
     <div class="row">
       <button type="button" class="icon-btn" id="pick" title="Select an element (Esc to cancel)" aria-pressed="false">
@@ -63,6 +70,21 @@
       </button>
     </div>
   </form>
+</div>
+
+<div class="model-menu" id="modelMenu" role="dialog" aria-label="Agent and model" hidden>
+  <nav class="menu-rail" id="agentRail" aria-label="Agents"></nav>
+  <div class="menu-models">
+    <label class="menu-search">
+      <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M7 2a5 5 0 1 0 3.1 8.9l3.5 3.5 1-1-3.5-3.5A5 5 0 0 0 7 2Zm0 1.5a3.5 3.5 0 1 1 0 7 3.5 3.5 0 0 1 0-7Z" fill="currentColor"/></svg>
+      <input id="modelSearch" type="text" placeholder="Search models…" autocomplete="off" spellcheck="false" aria-label="Search models">
+    </label>
+    <div class="menu-list" id="modelList" role="listbox" aria-label="Models"></div>
+  </div>
+  <div class="menu-effort">
+    <div class="menu-head"><span>Reasoning</span><span class="muted" id="effortFor"></span></div>
+    <div class="menu-list" id="effortList" role="listbox" aria-label="Reasoning level"></div>
+  </div>
 </div>
 </body>
 </html>

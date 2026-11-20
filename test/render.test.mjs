@@ -55,3 +55,37 @@ test("splitArgs and prompt", () => {
   assert.match(p, /component <x-button> \(protodeck\/components\/button\.html\)/);
   assert.match(p, /Instruction:\nMake it blue$/);
 });
+
+test("agent choices are checked against the discovered models", async () => {
+  const { AgentRunner } = await import("../dist/agent.js");
+  const agents = [
+    { kind: "claude", label: "Claude Code", models: [{ id: "", label: "Default", efforts: ["low", "high"] }, { id: "opus", label: "Opus", efforts: ["low", "high"] }] },
+    { kind: "codex", label: "Codex", models: [{ id: "", label: "Default", efforts: [] }] },
+  ];
+  const r = new AgentRunner({ agents, cwd: ".", protoRel: "protodeck" }, () => {});
+  assert.deepEqual(r.resolve(undefined), { agent: "claude", model: "", effort: "" });
+  assert.deepEqual(r.resolve({ agent: "claude", model: "opus", effort: "high" }), { agent: "claude", model: "opus", effort: "high" });
+  assert.throws(() => r.resolve({ agent: "claude", model: "--dangerous" }), /Unknown model/);
+  assert.throws(() => r.resolve({ agent: "codex", effort: "high" }), /does not support/);
+});
+
+test("codex models come from its local cache, listed ones only", async () => {
+  const { codexModels } = await import("../dist/agent.js");
+  const { mkdtempSync, writeFileSync } = await import("node:fs");
+  const { join } = await import("node:path");
+  const { tmpdir } = await import("node:os");
+  const dir = mkdtempSync(join(tmpdir(), "protodeck-codex-"));
+  writeFileSync(
+    join(dir, "models_cache.json"),
+    JSON.stringify({
+      models: [
+        { slug: "b", display_name: "B", visibility: "list", priority: 2, supported_reasoning_levels: [{ effort: "low" }], default_reasoning_level: "low" },
+        { slug: "hidden", visibility: "hide", priority: 0 },
+        { slug: "a", display_name: "A", visibility: "list", priority: 1, supported_reasoning_levels: [{ effort: "high" }, { effort: "bad value" }] },
+      ],
+    })
+  );
+  assert.deepEqual(codexModels(dir).map((m) => m.id), ["", "a", "b"]);
+  assert.deepEqual(codexModels(dir)[1].efforts, ["high"]);
+  assert.deepEqual(codexModels(join(dir, "missing")).map((m) => m.id), [""]);
+});

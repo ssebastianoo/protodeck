@@ -5,7 +5,7 @@ import { join, resolve, sep, extname, relative } from "node:path";
 import { randomBytes } from "node:crypto";
 import { BINARY, TEXT, VERSION } from "./assets.generated.js";
 import { renderPage } from "./render.js";
-import { AgentRunner, type AgentEvent, type AgentOptions, type ChatContext } from "./agent.js";
+import { AgentRunner, type AgentChoice, type AgentEvent, type AgentOptions, type ChatContext } from "./agent.js";
 
 export interface ServerOptions {
   root: string; // absolute prototype folder
@@ -231,7 +231,7 @@ export class ProtoServer {
     if (path === "/") {
       const page = TEXT["gallery.html"]
         .replaceAll("%VERSION%", VERSION)
-        .replace("%BOOT%", JSON.stringify({ token: this.token, agent: this.agent.kind, version: VERSION }).replace(/</g, "\\u003c"));
+        .replace("%BOOT%", JSON.stringify({ token: this.token, agents: this.agent.agents, version: VERSION }).replace(/</g, "\\u003c"));
       return this.send(res, 200, MIME[".html"], page);
     }
 
@@ -257,11 +257,15 @@ export class ProtoServer {
     if (req.method === "POST") {
       if (req.headers["x-protodeck-token"] !== this.token) return this.json(res, 403, { error: "Bad token" });
       if (name === "chat") {
-        if (this.agent.kind === "none") return this.json(res, 400, { error: "No agent configured. Restart with --agent claude|codex|\"<command>\"" });
+        if (!this.agent.agents.length) return this.json(res, 400, { error: "No agent configured. Restart with --agent claude|codex|\"<command>\"" });
         if (this.agent.busy) return this.json(res, 409, { error: "The agent is still working" });
-        const body = (await this.readBody(req)) as ChatContext;
+        const body = (await this.readBody(req)) as ChatContext & { agent?: AgentChoice };
         if (!body.message?.trim()) return this.json(res, 400, { error: "Empty message" });
-        this.agent.run(body);
+        try {
+          this.agent.run(body, body.agent);
+        } catch (e: any) {
+          return this.json(res, 400, { error: e.message });
+        }
         return this.json(res, 200, { ok: true });
       }
       if (name === "stop") {
@@ -292,7 +296,7 @@ export class ProtoServer {
         return this.json(res, 200, {
           screens: listScreens(this.opts.root),
           components: listComponents(this.opts.root),
-          agent: { kind: this.agent.kind, busy: this.agent.busy, history: this.agent.history as AgentEvent[] },
+          agent: { busy: this.agent.busy, history: this.agent.history as AgentEvent[] },
           root: relative(process.cwd(), this.opts.root) || ".",
         });
       case "component": {

@@ -1,8 +1,31 @@
 // Spawns the user's coding agent for chat-bar instructions and turns its output into events.
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
-import { realpathSync } from "node:fs";
+import { readFileSync, realpathSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
 
-export type AgentKind = "claude" | "codex" | "custom" | "none";
+export type AgentKind = "claude" | "codex" | "custom";
+
+export interface ModelInfo {
+  /** Value passed to the CLI; "" means the agent's own default. */
+  id: string;
+  label: string;
+  /** Reasoning levels the model accepts. The UI adds a "Default" choice that passes nothing. */
+  efforts: string[];
+  defaultEffort?: string;
+}
+
+export interface AgentInfo {
+  kind: AgentKind;
+  label: string;
+  models: ModelInfo[];
+}
+
+export interface AgentChoice {
+  agent: AgentKind;
+  model?: string;
+  effort?: string;
+}
 
 export interface AgentEvent {
   kind: "start" | "text" | "tool" | "error" | "done";
@@ -18,7 +41,8 @@ export interface ChatContext {
 }
 
 export interface AgentOptions {
-  kind: AgentKind;
+  /** Agents the user can pick from in the gallery. Empty turns chat off. */
+  agents: AgentInfo[];
   /** Command template for `custom`, e.g. `aider --message {prompt}`. */
   command?: string;
   /** Extra args appended to the claude/codex command line. */
@@ -33,10 +57,57 @@ export function hasCommand(cmd: string): boolean {
   return r.status === 0;
 }
 
-export function detectAgent(): AgentKind {
-  if (hasCommand("claude")) return "claude";
-  if (hasCommand("codex")) return "codex";
-  return "none";
+const CLAUDE_EFFORTS = ["low", "medium", "high", "xhigh", "max"];
+
+function claudeAgent(): AgentInfo {
+  const m = (id: string, label: string): ModelInfo => ({ id, label, efforts: CLAUDE_EFFORTS });
+  return {
+    kind: "claude",
+    label: "Claude Code",
+    models: [m("", "Default"), m("opus", "Opus"), m("sonnet", "Sonnet"), m("haiku", "Haiku"), m("fable", "Fable")],
+  };
+}
+
+/** Reads the model list Codex caches locally. Falls back to the default model only. */
+export function codexModels(home = process.env.CODEX_HOME || join(homedir(), ".codex")): ModelInfo[] {
+  const models: ModelInfo[] = [{ id: "", label: "Default", efforts: ["low", "medium", "high"] }];
+  try {
+    const data = JSON.parse(readFileSync(join(home, "models_cache.json"), "utf8"));
+    const list = (Array.isArray(data?.models) ? data.models : [])
+      .filter((x: any) => typeof x?.slug === "string" && x.visibility === "list")
+      .sort((a: any, b: any) => (a.priority ?? 99) - (b.priority ?? 99));
+    for (const x of list) {
+      const efforts = (Array.isArray(x.supported_reasoning_levels) ? x.supported_reasoning_levels : [])
+        .map((l: any) => l?.effort)
+        .filter((e: unknown): e is string => typeof e === "string" && /^[\w-]+$/.test(e));
+      models.push({ id: x.slug, label: String(x.display_name || x.slug), efforts, defaultEffort: x.default_reasoning_level });
+    }
+  } catch {}
+  return models;
+}
+
+function codexAgent(): AgentInfo {
+  return { kind: "codex", label: "Codex", models: codexModels() };
+}
+
+/**
+ * Lists the agents to offer. `preferred` is the --agent value: claude/codex are included even if
+ * not on PATH, any other value is a custom command. Returns the list and the default agent.
+ */
+export function discoverAgents(preferred?: string): { agents: AgentInfo[]; command?: string } {
+  if (preferred === "none") return { agents: [] };
+  const agents: AgentInfo[] = [];
+  let command: string | undefined;
+  if (preferred && preferred !== "claude" && preferred !== "codex") {
+    command = preferred;
+    agents.push({ kind: "custom", label: splitArgs(preferred)[0] ?? "Custom", models: [{ id: "", label: "Default", efforts: [] }] });
+  }
+  const claude = preferred === "claude" || hasCommand("claude");
+  const codex = preferred === "codex" || hasCommand("codex");
+  if (preferred === "codex" && codex) agents.push(codexAgent());
+  if (claude) agents.push(claudeAgent());
+  if (codex && preferred !== "codex") agents.push(codexAgent());
+  return { agents, command };
 }
 
 /** Splits a command template into argv, honoring single and double quotes. */
@@ -86,12 +157,15 @@ function describeTool(name: string, input: Record<string, unknown> | undefined):
 export class AgentRunner {
   private child: ChildProcess | null = null;
   private sessionId: string | null = null;
+  /** Agent of the current conversation; switching agents starts a new one. */
+  private sessionKind: AgentKind | null = null;
+  private runningKind: AgentKind | null = null;
   readonly history: AgentEvent[] = [];
 
   constructor(private opts: AgentOptions, private emit: Emit) {}
 
-  get kind(): AgentKind {
-    return this.opts.kind;
+  get agents(): AgentInfo[] {
+    return this.opts.agents;
   }
 
   get busy(): boolean {
@@ -100,6 +174,7 @@ export class AgentRunner {
 
   reset(): void {
     this.sessionId = null;
+    this.sessionKind = null;
     this.history.length = 0;
   }
 
@@ -121,16 +196,33 @@ export class AgentRunner {
     this.emit(ev);
   }
 
-  private command(prompt: string): { cmd: string; args: string[] } {
+  /** Checks a choice from the browser against the discovered agents, so only known values reach argv. */
+  resolve(choice: Partial<AgentChoice> | undefined): Required<AgentChoice> {
+    const agent = this.opts.agents.find((a) => a.kind === choice?.agent) ?? this.opts.agents[0];
+    if (!agent) throw new Error("No agent configured");
+    const model = agent.models.find((m) => m.id === (choice?.model ?? ""));
+    if (!model) throw new Error(`Unknown model for ${agent.label}: ${choice?.model}`);
+    const effort = choice?.effort ?? "";
+    if (effort && !model.efforts.includes(effort)) throw new Error(`${model.label} does not support reasoning level ${effort}`);
+    return { agent: agent.kind, model: model.id, effort };
+  }
+
+  private command(prompt: string, c: Required<AgentChoice>): { cmd: string; args: string[] } {
     const extra = this.opts.extraArgs ?? [];
-    switch (this.opts.kind) {
+    switch (c.agent) {
       case "claude": {
         const args = ["-p", prompt, "--output-format", "stream-json", "--verbose", "--permission-mode", "acceptEdits"];
         if (this.sessionId) args.push("--resume", this.sessionId);
+        if (c.model) args.push("--model", c.model);
+        if (c.effort) args.push("--effort", c.effort);
         return { cmd: "claude", args: [...args, ...extra] };
       }
-      case "codex":
-        return { cmd: "codex", args: ["exec", "--json", "--full-auto", "--skip-git-repo-check", ...extra, prompt] };
+      case "codex": {
+        const args = ["exec", "--json", "--full-auto", "--skip-git-repo-check"];
+        if (c.model) args.push("--model", c.model);
+        if (c.effort) args.push("-c", `model_reasoning_effort="${c.effort}"`);
+        return { cmd: "codex", args: [...args, ...extra, prompt] };
+      }
       case "custom": {
         const parts = splitArgs(this.opts.command ?? "");
         let used = false;
@@ -147,10 +239,16 @@ export class AgentRunner {
     }
   }
 
-  run(ctx: ChatContext): void {
+  run(ctx: ChatContext, choice?: Partial<AgentChoice>): void {
     if (this.child) throw new Error("The agent is still working on the previous instruction");
+    const c = this.resolve(choice);
+    if (this.sessionKind !== c.agent) {
+      this.sessionId = null;
+      this.sessionKind = c.agent;
+    }
+    this.runningKind = c.agent;
     const prompt = buildPrompt(ctx, this.opts.protoRel);
-    const { cmd, args } = this.command(prompt);
+    const { cmd, args } = this.command(prompt, c);
     this.push({ kind: "start", text: ctx.message });
 
     const child = spawn(cmd, args, {
@@ -203,14 +301,14 @@ export class AgentRunner {
   }
 
   private handleLine(line: string): void {
-    if (this.opts.kind === "custom") return this.push({ kind: "text", text: line });
+    if (this.runningKind === "custom") return this.push({ kind: "text", text: line });
     let msg: any;
     try {
       msg = JSON.parse(line);
     } catch {
       return this.push({ kind: "text", text: line });
     }
-    if (this.opts.kind === "claude") this.handleClaude(msg);
+    if (this.runningKind === "claude") this.handleClaude(msg);
     else this.handleCodex(msg);
   }
 
