@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="32" height="32" fill="none">
+  <title>protodeck</title>
+  <!-- Golden ratio stack (φ ≈ 1.618).
+       Three portrait φ rectangles, each 1/φ the size of the one behind it:
+       widths 52 → 32.1 → 19.8, heights 84 → 52 → 32.1 (each height equals the previous width).
+       Each overlap is the next term in the series (19.8, then 12.3). Corner radii 12 → 7.4 → 4.6.
+       All three share a baseline. -->
+  <defs>
+    <mask id="pds-m1" maskUnits="userSpaceOnUse" x="0" y="0" width="100" height="100">
+      <rect width="100" height="100" fill="#fff"/>
+      <rect x="46.3" y="40" width="32.1" height="52" rx="7.4" fill="#000" stroke="#000" stroke-width="7"/>
+    </mask>
+    <mask id="pds-m2" maskUnits="userSpaceOnUse" x="0" y="0" width="100" height="100">
+      <rect width="100" height="100" fill="#fff"/>
+      <rect x="66.1" y="59.9" width="19.8" height="32.1" rx="4.6" fill="#000" stroke="#000" stroke-width="7"/>
+    </mask>
+  </defs>
+  <rect x="14.1" y="8" width="52" height="84" rx="12" fill="currentColor" fill-opacity="0.32" mask="url(#pds-m1)"/>
+  <rect x="46.3" y="40" width="32.1" height="52" rx="7.4" fill="currentColor" mask="url(#pds-m2)"/>
+  <rect x="66.1" y="59.9" width="19.8" height="32.1" rx="4.6" fill="var(--accent, #6366f1)"/>
+</svg>
