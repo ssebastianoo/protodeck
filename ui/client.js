@@ -28,8 +28,13 @@
     } catch {}
   });
 
+  // ---------- theme (data-theme on <html> drives Tailwind's dark: variant) ----------
+  const setTheme = (t) => document.documentElement.setAttribute("data-theme", t === "dark" ? "dark" : "light");
+
   // ---------- live reload (standalone tabs only; the gallery reloads its frames itself) ----------
   if (!inGallery) {
+    const mq = matchMedia("(prefers-color-scheme: dark)");
+    mq.addEventListener("change", () => setTheme(mq.matches ? "dark" : "light"));
     const es = new EventSource("/__protodeck/events");
     let down = false;
     es.addEventListener("change", (e) => {
@@ -190,8 +195,24 @@
     "keydown",
     (e) => {
       if (e.key === "Escape" && picking) send({ type: "protodeck:cancel" });
+      // Canvas zoom shortcuts work while a frame has focus too.
+      if ((e.metaKey || e.ctrlKey) && !e.altKey && ["=", "+", "-", "_", "0"].includes(e.key)) {
+        e.preventDefault();
+        send({ type: "protodeck:key", key: e.key, mod: true });
+      }
     },
     true
+  );
+
+  // Pinch (ctrl+wheel) over a frame zooms the gallery canvas instead of the page.
+  window.addEventListener(
+    "wheel",
+    (e) => {
+      if (!e.ctrlKey) return;
+      e.preventDefault();
+      send({ type: "protodeck:zoom", deltaY: e.deltaY, deltaMode: e.deltaMode, x: e.clientX, y: e.clientY });
+    },
+    { passive: false }
   );
 
   const follow = () => {
@@ -213,6 +234,8 @@
         hovered = null;
         place(hoverBox, null);
       }
+    } else if (d.type === "protodeck:theme") {
+      setTheme(d.theme);
     } else if (d.type === "protodeck:highlight") {
       if (!d.selector) {
         selected = null;

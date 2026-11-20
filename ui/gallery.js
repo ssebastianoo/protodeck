@@ -3,7 +3,7 @@
   const BOOT = window.__protodeckGallery;
   const $ = (id) => document.getElementById(id);
 
-  const DEVICES = [
+  const BUILTIN_DEVICES = [
     { id: "macbook", name: "MacBook Air 13″", w: 1470, h: 956, type: "laptop", on: true },
     { id: "iphone", name: "iPhone 16 Pro", w: 402, h: 874, type: "iphone", on: true },
     { id: "galaxy", name: "Samsung Galaxy S24", w: 360, h: 780, type: "android", on: true },
@@ -29,12 +29,27 @@
     },
   };
 
+  // User-defined sizes, stored per browser: { id, name, w, h }.
+  let customDevices = (() => {
+    const list = store.get("customDevices", []);
+    return Array.isArray(list)
+      ? list.filter((d) => d && typeof d.id === "string" && d.w > 0 && d.h > 0).map((d) => ({ id: d.id, name: String(d.name || `${d.w}×${d.h}`), w: d.w, h: d.h, type: "custom", custom: true }))
+      : [];
+  })();
+  let DEVICES = [...BUILTIN_DEVICES, ...customDevices];
+
+  const ZOOM_MIN = 160;
+  const ZOOM_MAX = 1600;
+  const ZOOM_DEFAULT = 560;
+
   const state = {
     screens: [],
     components: [],
     enabled: new Set(store.get("devices", DEVICES.filter((d) => d.on).map((d) => d.id))),
     size: store.get("size", 560),
     sameHeight: store.get("sameHeight", true),
+    showComponents: store.get("showComponents", false),
+    addingDevice: false,
     routes: (() => {
       const r = store.get("routes", null);
       return Array.isArray(r) && r.length ? new Set(r) : null; // null = all routes
@@ -99,6 +114,10 @@
         shell.append(lid, el("div", "laptop-base"));
         break;
       }
+      case "custom":
+        shell = el("div", "shell shell-plain");
+        shell.appendChild(wrap);
+        break;
       default: {
         shell = el("div", "shell shell-monitor");
         const panel = el("div", "monitor-panel");
@@ -212,6 +231,13 @@
 
   function renderComponents() {
     const grid = $("components");
+    const show = state.showComponents && state.components.length > 0;
+    $("componentsSection").hidden = !show;
+    if (!show) {
+      // Drop the frames so hidden components don't keep loading or reloading.
+      grid.textContent = "";
+      return;
+    }
     const have = [...grid.children].map((n) => n.dataset.name).join(",");
     if (have === state.components.join(",")) return;
     grid.textContent = "";
@@ -224,7 +250,6 @@
       card.append(f, label);
       grid.appendChild(card);
     }
-    $("componentsSection").hidden = state.components.length === 0;
   }
 
   function relayoutAll() {
@@ -232,8 +257,8 @@
   }
 
   // ---------- routes & devices dropdowns ----------
-  function menuItem(label, hint, checked, onClick) {
-    const b = el("button", "menu-item", { type: "button", role: "menuitemcheckbox", "aria-checked": String(checked) });
+  function menuItem(label, hint, checked, onClick, role = "menuitemcheckbox") {
+    const b = el("button", "menu-item", { type: "button", role, "aria-checked": String(checked) });
     b.innerHTML = CHECK + '<span class="name"></span>';
     b.querySelector(".name").textContent = label;
     if (hint) {
@@ -278,10 +303,59 @@
     $("routesBtn").title = all ? "Showing all routes" : visibleScreens().map((s) => "/" + s.path).join("\n");
   }
 
+  function saveCustomDevices() {
+    store.set("customDevices", customDevices.map(({ id, name, w, h }) => ({ id, name, w, h })));
+    DEVICES = [...BUILTIN_DEVICES, ...customDevices];
+  }
+
+  function removeCustomDevice(id) {
+    customDevices = customDevices.filter((d) => d.id !== id);
+    saveCustomDevices();
+    state.enabled.delete(id);
+    if (!DEVICES.some((d) => state.enabled.has(d.id))) state.enabled.add(DEVICES[0].id);
+    store.set("devices", [...state.enabled]);
+    renderScreens(true);
+  }
+
+  function customDeviceForm() {
+    const form = el("form", "custom-form");
+    form.innerHTML =
+      '<input class="full" name="name" placeholder="Name (optional)" autocomplete="off" aria-label="Device name">' +
+      '<input name="w" type="number" min="100" max="4000" placeholder="Width" required aria-label="Width in pixels">' +
+      '<input name="h" type="number" min="100" max="4000" placeholder="Height" required aria-label="Height in pixels">' +
+      '<p class="err" hidden></p>' +
+      '<div class="actions"><button type="button" class="btn" data-cancel>Cancel</button><button type="submit" class="btn primary">Add</button></div>';
+    form.addEventListener("submit", (e) => {
+      e.preventDefault();
+      const w = Math.round(Number(form.elements.w.value));
+      const h = Math.round(Number(form.elements.h.value));
+      if (!(w >= 100 && w <= 4000 && h >= 100 && h <= 4000)) {
+        const err = form.querySelector(".err");
+        err.textContent = "Width and height must be between 100 and 4000 px.";
+        err.hidden = false;
+        return;
+      }
+      const name = form.elements.name.value.trim() || `Custom ${w}×${h}`;
+      const d = { id: "custom-" + Date.now().toString(36), name, w, h, type: "custom", custom: true };
+      customDevices.push(d);
+      saveCustomDevices();
+      state.enabled.add(d.id);
+      store.set("devices", [...state.enabled]);
+      state.addingDevice = false;
+      renderScreens(true);
+    });
+    form.querySelector("[data-cancel]").addEventListener("click", () => {
+      state.addingDevice = false;
+      renderDevicesMenu();
+    });
+    return form;
+  }
+
   function renderDevicesMenu() {
     const menu = $("devicesMenu");
     menu.textContent = "";
     for (const d of DEVICES) {
+      if (d === customDevices[0]) menu.appendChild(el("div", "sep"));
       const on = state.enabled.has(d.id);
       const b = menuItem(d.name, `${d.w}×${d.h}`, on, () => {
         if (on) state.enabled.delete(d.id);
@@ -290,20 +364,71 @@
         renderScreens(true);
       });
       if (on && state.enabled.size === 1) b.disabled = true;
+      if (d.custom) {
+        const x = el("span", "remove", { role: "button", title: `Remove ${d.name}`, "aria-label": `Remove ${d.name}` });
+        x.textContent = "×";
+        x.addEventListener("click", (e) => {
+          e.stopPropagation();
+          removeCustomDevice(d.id);
+        });
+        b.appendChild(x);
+      }
       menu.appendChild(b);
+    }
+    menu.appendChild(el("div", "sep"));
+    if (state.addingDevice) {
+      const form = customDeviceForm();
+      menu.appendChild(form);
+      if (!menu.hidden) requestAnimationFrame(() => form.elements.w.focus());
+    } else {
+      const add = el("button", "menu-item", { type: "button", role: "menuitem" });
+      add.innerHTML = '<svg class="check" style="visibility:visible;color:var(--muted)" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 3v10M3 8h10" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg><span class="name">Add custom size…</span>';
+      add.addEventListener("click", () => {
+        state.addingDevice = true;
+        renderDevicesMenu();
+      });
+      menu.appendChild(add);
     }
     const on = DEVICES.filter((d) => state.enabled.has(d.id));
     $("devicesLabel").textContent = on.length === 1 ? on[0].name : on.length === DEVICES.length ? "All" : `${on.length} devices`;
     $("devicesBtn").title = on.map((d) => d.name).join("\n");
   }
 
+  function renderSettingsMenu() {
+    const menu = $("settingsMenu");
+    menu.textContent = "";
+    const n = state.components.length;
+    const comp = menuItem("Show components", n ? String(n) : "none yet", state.showComponents, () => {
+      state.showComponents = !state.showComponents;
+      store.set("showComponents", state.showComponents);
+      renderComponents();
+      renderSettingsMenu();
+    });
+    menu.appendChild(comp);
+    menu.appendChild(el("div", "sep"));
+    menu.appendChild(Object.assign(el("div", "menu-label"), { textContent: "Frame scale" }));
+    const setScale = (same) => {
+      state.sameHeight = same;
+      store.set("sameHeight", same);
+      relayoutAll();
+      renderSettingsMenu();
+    };
+    menu.appendChild(menuItem("Same height", "", state.sameHeight, () => setScale(true), "menuitemradio"));
+    menu.appendChild(menuItem("True relative size", "", !state.sameHeight, () => setScale(false), "menuitemradio"));
+  }
+
   function renderPickers() {
     renderRoutesMenu();
     renderDevicesMenu();
+    renderSettingsMenu();
   }
 
-  const PICKERS = ["routes", "devices"];
+  const PICKERS = ["routes", "devices", "settings"];
   function openPicker(id) {
+    if (id !== "devices" && state.addingDevice) {
+      state.addingDevice = false;
+      renderDevicesMenu();
+    }
     for (const p of PICKERS) {
       const open = p === id;
       $(p + "Menu").hidden = !open;
@@ -399,6 +524,7 @@
     const d = e.data;
     switch (d.type) {
       case "protodeck:ready":
+        post(frame, { type: "protodeck:theme", theme: currentTheme() });
         if (state.picking) post(frame, { type: "protodeck:pick", on: true });
         if (state.selection && state.selection.screen === info.screen && state.selection.device === info.device)
           post(frame, { type: "protodeck:highlight", selector: state.selection.selector });
@@ -422,6 +548,15 @@
         break;
       case "protodeck:cancel":
         setPicking(false);
+        break;
+      case "protodeck:zoom": {
+        const r = frame.getBoundingClientRect();
+        const k = frame.offsetWidth ? r.width / frame.offsetWidth : 1;
+        wheelZoom(Number(d.deltaY) || 0, Number(d.deltaMode) || 0, r.left + d.x * k, r.top + d.y * k);
+        break;
+      }
+      case "protodeck:key":
+        zoomKey(d.key);
         break;
     }
   });
@@ -474,6 +609,191 @@
       wasDown = true;
     };
   }
+
+  // ---------- theme ----------
+  const currentTheme = () => (document.documentElement.getAttribute("data-theme") === "dark" ? "dark" : "light");
+
+  function applyTheme(t) {
+    document.documentElement.setAttribute("data-theme", t);
+    window.__protodeckTheme = t;
+    for (const f of document.querySelectorAll("iframe")) post(f, { type: "protodeck:theme", theme: t });
+    const btn = $("themeBtn");
+    const label = t === "dark" ? "Switch to light mode" : "Switch to dark mode";
+    btn.title = label;
+    btn.setAttribute("aria-label", label);
+  }
+
+  function initTheme() {
+    applyTheme(currentTheme());
+    $("themeBtn").addEventListener("click", () => {
+      const t = currentTheme() === "dark" ? "light" : "dark";
+      store.set("theme", t);
+      applyTheme(t);
+    });
+    // Follow the system until the user picks a theme.
+    const mq = matchMedia("(prefers-color-scheme: dark)");
+    mq.addEventListener("change", () => {
+      const saved = store.get("theme", null);
+      if (saved !== "dark" && saved !== "light") applyTheme(mq.matches ? "dark" : "light");
+    });
+  }
+
+  // ---------- canvas zoom & pan ----------
+  const clampSize = (n) => Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, Math.round(n)));
+
+  /** The figure closest to a viewport point, used to keep that spot still while zooming. */
+  function nearestFigure(x, y) {
+    let best = null;
+    let bestD = Infinity;
+    for (const fig of document.querySelectorAll("#screens figure")) {
+      const r = fig.querySelector(".sizer").getBoundingClientRect();
+      const dx = Math.max(r.left - x, 0, x - r.right);
+      const dy = Math.max(r.top - y, 0, y - r.bottom);
+      const d = dx * dx + dy * dy;
+      if (d < bestD) {
+        bestD = d;
+        best = fig;
+      }
+    }
+    return best;
+  }
+
+  /** Sets the frame size, keeping the point (x, y) in viewport coordinates fixed. Defaults to the canvas center. */
+  function zoomTo(size, x, y) {
+    size = clampSize(size);
+    if (size === state.size) return;
+    const canvas = $("canvas");
+    const cr = canvas.getBoundingClientRect();
+    if (x == null) {
+      x = cr.left + canvas.clientWidth / 2;
+      y = cr.top + canvas.clientHeight / 2;
+    }
+    const anchor = nearestFigure(x, y);
+    let fx = 0;
+    let fy = 0;
+    if (anchor) {
+      const r = anchor.querySelector(".sizer").getBoundingClientRect();
+      fx = r.width ? (x - r.left) / r.width : 0;
+      fy = r.height ? (y - r.top) / r.height : 0;
+    }
+    state.size = size;
+    $("zoom").value = size;
+    store.set("size", size);
+    relayoutAll();
+    if (anchor && anchor.isConnected) {
+      const r = anchor.querySelector(".sizer").getBoundingClientRect();
+      canvas.scrollLeft += r.left + fx * r.width - x;
+      canvas.scrollTop += r.top + fy * r.height - y;
+    }
+  }
+
+  function wheelZoom(deltaY, deltaMode, x, y) {
+    const px = deltaY * (deltaMode === 1 ? 16 : deltaMode === 2 ? 400 : 1);
+    const step = Math.max(-60, Math.min(60, px));
+    zoomTo(state.size * Math.exp(-step * 0.01), x, y);
+  }
+
+  /** Zoom shortcuts; returns true when the key was handled. */
+  function zoomKey(key) {
+    if (key === "=" || key === "+") zoomTo(state.size * 1.2);
+    else if (key === "-" || key === "_") zoomTo(state.size / 1.2);
+    else if (key === "0") zoomTo(ZOOM_DEFAULT);
+    else return false;
+    return true;
+  }
+
+  const isTyping = (t) => !!(t && t.closest && t.closest("input, textarea, select, [contenteditable=''], [contenteditable='true']"));
+
+  function initCanvas() {
+    const canvas = $("canvas");
+    $("zoom").value = state.size;
+    $("zoom").addEventListener("input", (e) => zoomTo(Number(e.target.value)));
+
+    // Pinch on a trackpad and Ctrl/⌘ + wheel zoom; plain wheel and two-finger swipes scroll natively.
+    canvas.addEventListener(
+      "wheel",
+      (e) => {
+        if (!e.ctrlKey && !e.metaKey) return;
+        e.preventDefault();
+        wheelZoom(e.deltaY, e.deltaMode, e.clientX, e.clientY);
+      },
+      { passive: false },
+    );
+    // Safari reports pinches as gesture events instead of ctrl+wheel.
+    let gestureStart = 0;
+    canvas.addEventListener("gesturestart", (e) => {
+      e.preventDefault();
+      gestureStart = state.size;
+    });
+    canvas.addEventListener("gesturechange", (e) => {
+      e.preventDefault();
+      zoomTo(gestureStart * e.scale, e.clientX, e.clientY);
+    });
+    canvas.addEventListener("gestureend", (e) => e.preventDefault());
+
+    // Drag to pan: on the background, with the middle button, or anywhere while Space is held.
+    let space = false;
+    let drag = null;
+    const setSpace = (on) => {
+      space = on;
+      canvas.classList.toggle("can-pan", on);
+    };
+    canvas.addEventListener("pointerdown", (e) => {
+      const onBackground = !e.target.closest("figure, .component-card, a, button, .screen-head, .empty");
+      if (!(space || e.button === 1 || (e.button === 0 && onBackground))) return;
+      e.preventDefault();
+      drag = { id: e.pointerId, x: e.clientX, y: e.clientY };
+      canvas.setPointerCapture(e.pointerId);
+      canvas.classList.add("panning");
+    });
+    canvas.addEventListener("pointermove", (e) => {
+      if (!drag || e.pointerId !== drag.id) return;
+      canvas.scrollLeft -= e.clientX - drag.x;
+      canvas.scrollTop -= e.clientY - drag.y;
+      drag.x = e.clientX;
+      drag.y = e.clientY;
+    });
+    const endDrag = (e) => {
+      if (!drag || e.pointerId !== drag.id) return;
+      drag = null;
+      canvas.classList.remove("panning");
+    };
+    canvas.addEventListener("pointerup", endDrag);
+    canvas.addEventListener("pointercancel", endDrag);
+
+    document.addEventListener("keydown", (e) => {
+      const mod = e.metaKey || e.ctrlKey;
+      if (mod && !e.altKey && zoomKeyMatches(e.key)) {
+        e.preventDefault();
+        zoomKey(e.key);
+        return;
+      }
+      if (isTyping(e.target) || e.altKey || mod || PICKERS.some((p) => !$(p + "Menu").hidden) || !$("modelMenu").hidden) return;
+      if (e.key === " ") {
+        if (e.target.closest && e.target.closest("button, a, [role=button]")) return;
+        e.preventDefault();
+        if (!e.repeat) setSpace(true);
+        return;
+      }
+      if (zoomKeyMatches(e.key)) {
+        e.preventDefault();
+        zoomKey(e.key);
+        return;
+      }
+      const step = e.shiftKey ? 400 : 80;
+      const moves = { ArrowLeft: [-step, 0], ArrowRight: [step, 0], ArrowUp: [0, -step], ArrowDown: [0, step] };
+      const m = moves[e.key];
+      if (m) {
+        e.preventDefault();
+        canvas.scrollBy({ left: m[0], top: m[1] });
+      }
+    });
+    document.addEventListener("keyup", (e) => {
+      if (e.key === " ") setSpace(false);
+    });
+    window.addEventListener("blur", () => setSpace(false));
+  }
+  const zoomKeyMatches = (k) => ["=", "+", "-", "_", "0"].includes(k);
 
   // ---------- chat ----------
   function escapeHtml(s) {
@@ -775,21 +1095,9 @@
   }
 
   function init() {
-    $("zoom").value = state.size;
-    $("zoom").addEventListener("input", (e) => {
-      state.size = Number(e.target.value);
-      store.set("size", state.size);
-      relayoutAll();
-    });
-    const modeBtn = $("scaleMode");
-    const paintMode = () => (modeBtn.textContent = state.sameHeight ? "Same height" : "True size");
-    paintMode();
-    modeBtn.addEventListener("click", () => {
-      state.sameHeight = !state.sameHeight;
-      store.set("sameHeight", state.sameHeight);
-      paintMode();
-      relayoutAll();
-    });
+    state.size = clampSize(Number(state.size) || ZOOM_DEFAULT);
+    initTheme();
+    initCanvas();
     initPickers();
 
     if (!AGENTS.length) {

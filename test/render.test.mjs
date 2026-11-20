@@ -45,6 +45,13 @@ test("renderPage wraps fragments and injects into existing heads", () => {
   assert.match(full, /<head><meta charset="utf-8">.*--color-x:red.*<title>t<\/title>/s);
 });
 
+test("renderPage sets data-theme early and maps dark: to it", () => {
+  const page = renderPage("<p>hi</p>", load, { version: "1" });
+  assert.match(page, /@custom-variant dark \(&:where\(\[data-theme=dark\]/);
+  assert.match(page, /__protodeckTheme.*setAttribute\("data-theme",t\)/s);
+  assert.ok(page.indexOf("data-theme\",t") < page.indexOf("client.js"));
+});
+
 test("splitArgs and prompt", () => {
   assert.deepEqual(splitArgs(`aider --message "{prompt}" --x 'a b'`), ["aider", "--message", "{prompt}", "--x", "a b"]);
   const p = buildPrompt(

@@ -35,6 +35,14 @@ Every HTML file gets Tailwind, a base reset, the Inter font and the live reload 
 
 Use it in a screen as `<x-card title="Plan">…</x-card>` or `<x-card />`. Attributes fill `{{name}}` (with an optional `| fallback`), and children go into `<slot></slot>`. Components can use other components.
 
+## Gallery
+
+- **Move around:** scroll or swipe with two fingers to pan, drag the background, or hold Space and drag. Arrow keys pan too (Shift for bigger steps).
+- **Zoom:** pinch, Ctrl/⌘ + scroll, ⌘ + `+`/`-`, or the slider. ⌘ + `0` resets.
+- **Devices:** pick frames from the Devices menu, or add your own width and height with "Add custom size…". Custom sizes are saved in the browser.
+- **View:** show or hide the components section (hidden by default) and switch between same-height and true relative frame sizes.
+- **Light and dark:** the button at the top right switches the gallery and the previews. Screens follow it through Tailwind's `dark:` variant (a `data-theme` attribute on `<html>`).
+
 ## Chat bar
 
 The bar at the bottom of the gallery sends an instruction to your agent along with:

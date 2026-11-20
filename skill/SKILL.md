@@ -29,6 +29,7 @@ The server injects these into every screen, so **never add them yourself**:
 - Tailwind CSS v4 (bundled, works offline). Use utility classes directly.
 - A base reset and the Inter font (`font-sans`).
 - Live reload: saved files appear in the browser immediately.
+- Dark mode: the gallery's light/dark toggle sets `data-theme` on `<html>`, and Tailwind's `dark:` variant follows it. Add `dark:` classes when a design should support both themes.
 - `<meta charset>` and the viewport meta tag.
 
 No `<script src=...tailwind...>`, no `<link>` to fonts or CDNs, no build step, no npm installs. A screen file can be just the body content:
