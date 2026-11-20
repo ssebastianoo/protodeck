@@ -4,6 +4,7 @@ import { spawn } from "node:child_process";
 import { TEMPLATES, TEXT, VERSION } from "./assets.generated.js";
 import { ProtoServer } from "./server.js";
 import { discoverAgents, splitArgs } from "./agent.js";
+import { listServers, register, stopServer } from "./registry.js";
 
 const HELP = `protodeck ${VERSION}: prototype server for coding agents
 
@@ -11,6 +12,7 @@ Usage
   protodeck [dir]              Serve the prototype folder (default: ./protodeck)
   protodeck init [dir]         Create a starter prototype folder and install the agent skill
   protodeck skill [--global]   Install the agent skill (.claude/skills and .agents/skills)
+  protodeck kill [port]        Stop protodeck servers left running in the background
 
 Options
   -p, --port <n>        Port (default 4321, the next free one is used if taken)
@@ -25,7 +27,7 @@ Options
 `;
 
 interface Args {
-  command: "serve" | "init" | "skill";
+  command: "serve" | "init" | "skill" | "kill";
   dir?: string;
   port: number;
   host: string;
@@ -82,7 +84,7 @@ function parseArgs(argv: string[]): Args {
         positional.push(arg);
     }
   }
-  if (positional[0] === "init" || positional[0] === "skill") a.command = positional.shift() as Args["command"];
+  if (positional[0] === "init" || positional[0] === "skill" || positional[0] === "kill") a.command = positional.shift() as Args["command"];
   a.dir = positional[0];
   return a;
 }
@@ -142,6 +144,8 @@ async function serve(a: Args): Promise<void> {
     agent: { agents, command, extraArgs: a.agentArgs ? splitArgs(a.agentArgs) : [], cwd, protoRel: relative(cwd, root) },
   });
   const port = await server.listen();
+  const unregister = register({ pid: process.pid, port, host: a.host, root, startedAt: Date.now() });
+  process.on("exit", unregister);
   const url = `http://${a.host === "0.0.0.0" || a.host === "::" ? "localhost" : a.host}:${port}/`;
   console.log(`\n  protodeck ${VERSION}`);
   console.log(`  ➜ ${url}`);
@@ -155,7 +159,31 @@ async function serve(a: Args): Promise<void> {
   process.on("SIGTERM", shutdown);
 }
 
+async function kill(portArg: string | undefined): Promise<void> {
+  let port: number | undefined;
+  if (portArg !== undefined) {
+    port = Number(portArg);
+    if (!Number.isInteger(port) || port < 1 || port > 65535) fail(`Invalid port ${portArg}`);
+  }
+  const servers = listServers().filter((s) => s.pid !== process.pid && (port === undefined || s.port === port));
+  if (!servers.length) {
+    console.log(port === undefined ? "No protodeck servers are running." : `No protodeck server is running on port ${port}.`);
+    return;
+  }
+  let failed = 0;
+  for (const s of servers) {
+    const ok = await stopServer(s);
+    if (!ok) failed++;
+    console.log(`  ${ok ? "stopped" : "failed "} port ${s.port} (pid ${s.pid}) ${relative(process.cwd(), s.root) || s.root}`);
+  }
+  if (failed) {
+    console.error(`\nprotodeck: could not stop ${failed} server${failed > 1 ? "s" : ""}. Stop ${failed > 1 ? "them" : "it"} manually with \`kill -9 <pid>\`.`);
+    process.exit(1);
+  }
+}
+
 const args = parseArgs(process.argv.slice(2));
 if (args.command === "init") init(args.dir);
 else if (args.command === "skill") installSkill(args.global);
+else if (args.command === "kill") await kill(args.dir);
 else await serve(args);

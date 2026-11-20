@@ -70,6 +70,7 @@ Pass extra flags with `--agent-args "--max-turns 20"`.
 protodeck [dir]              Serve the prototype folder (default ./protodeck)
 protodeck init [dir]         Create a starter prototype and install the skill
 protodeck skill [--global]   Install the skill into .claude/skills and .agents/skills
+protodeck kill [port]        Stop servers left running in the background (all, or the one on [port])
 
 -p, --port <n>       default 4321 (the next free port is used if it is taken)
 --host <host>        default 127.0.0.1
@@ -77,6 +78,8 @@ protodeck skill [--global]   Install the skill into .claude/skills and .agents/s
 --agent-args <args>  extra args for claude/codex
 -o, --open           open the browser
 ```
+
+If an agent started the server in the background and it is still running, `protodeck kill` stops it. Pass a port to stop only that one.
 
 ## The skill
 
