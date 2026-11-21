@@ -106,7 +106,7 @@ function write(path: string, content: string, force = false): boolean {
 function installSkill(global: boolean): void {
   const base = global ? (process.env.HOME ?? process.env.USERPROFILE ?? ".") : process.cwd();
   for (const dir of [".claude/skills", ".agents/skills"]) {
-    const p = join(base, dir, "prototype", "SKILL.md");
+    const p = join(base, dir, "protodeck", "SKILL.md");
     write(p, TEXT["SKILL.md"], true);
     console.log(`  skill  ${global ? p : relative(process.cwd(), p)}`);
   }

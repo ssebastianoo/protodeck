@@ -1,5 +1,5 @@
 ---
-name: prototype
+name: protodeck
 description: Build UI design prototypes as plain HTML screens in a protodeck/ folder, outside the app code, and preview them in device frames with protodeck. Use when asked to prototype, mock up, sketch or explore the design of screens, flows or components.
 ---
 
