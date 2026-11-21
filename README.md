@@ -1,3 +1,5 @@
+<img src="assets/logo.svg" alt="" width="72" height="72">
+
 # protodeck
 
 A prototype server for coding agents. Your agent writes plain HTML screens in a `protodeck/` folder, outside the app code. protodeck serves them with Tailwind, components and live reload, shows every screen side by side in MacBook, iPhone and Samsung frames, and adds a chat bar that sends your instructions back to the agent.
