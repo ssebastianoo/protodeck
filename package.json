@@ -16,6 +16,7 @@
   },
   "scripts": {
     "gen": "node scripts/gen-assets.mjs",
+    "dev": "node scripts/dev.mjs",
     "build": "node scripts/gen-assets.mjs && tsc -p tsconfig.json && node scripts/postbuild.mjs",
     "build:bin": "node scripts/gen-assets.mjs && bun build src/cli.ts --compile --minify --outfile bin/protodeck",
     "test": "npm run build && node --test test/",
