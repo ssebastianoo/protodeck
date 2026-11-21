@@ -360,6 +360,14 @@ code { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 0.92em
   .menu-rail { grid-row: 1 / span 2; }
 }
 .link:hover { color: var(--text); }
+.history-btn {
+  display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 26px;
+  border-radius: 8px; color: var(--muted);
+}
+.history-btn:hover { color: var(--text); background: var(--hover); }
+.history-btn[aria-expanded="true"] { color: var(--text); background: var(--hover); }
+.history-btn > svg { transition: transform 0.15s; }
+.history-btn[aria-expanded="true"] > svg { transform: rotate(180deg); }
 .row { display: flex; align-items: flex-end; gap: 8px; }
 .row textarea {
   flex: 1; resize: none; border: 0; outline: none; background: transparent;

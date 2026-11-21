@@ -76,7 +76,9 @@
       <span class="chip chip-el" id="elementChip" hidden><span id="elementLabel"></span><button type="button" id="clearElement" aria-label="Clear selected element">×</button></span>
       <span class="spacer"></span>
       <span class="status" id="status" hidden></span>
-      <button type="button" class="link" id="toggleLog" hidden>History</button>
+      <button type="button" class="history-btn" id="toggleLog" aria-expanded="false" aria-controls="log" aria-label="History" title="History" hidden>
+        <svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M4 10l4-4 4 4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>
       <button type="button" class="model-btn" id="modelBtn" aria-haspopup="dialog" aria-expanded="false" aria-controls="modelMenu" title="Choose agent, model and reasoning">
         <span class="mark" id="modelMark" aria-hidden="true"></span>
         <span class="model-label" id="modelLabel"></span>

@@ -993,6 +993,11 @@
   }
 
   function addLog(ev, scroll = true) {
+  function setLogOpen(open) {
+    $("log").hidden = !open;
+    $("toggleLog").setAttribute("aria-expanded", String(open));
+  }
+
     const log = $("log");
     const n = el("div", "msg msg-" + (ev.kind === "start" ? "user" : ev.kind));
     if (ev.kind === "done") n.textContent = ev.text || "Done";
@@ -1410,7 +1415,7 @@
   function onAgent(ev) {
     if (ev.kind === "start") {
       setBusy(true);
-      $("log").hidden = false;
+      setLogOpen(true);
     }
     addLog(ev);
     if (ev.kind === "done") setBusy(false);
@@ -1448,7 +1453,7 @@
       input.value = "";
       autosize();
     } catch (err) {
-      $("log").hidden = false;
+      setLogOpen(true);
       addLog({ kind: "error", text: err.message });
     }
   }
@@ -1513,12 +1518,12 @@
       $("pick").addEventListener("click", () => setPicking(!state.picking));
       $("clearElement").addEventListener("click", clearSelection);
       $("stop").addEventListener("click", () => api("stop").catch(() => {}));
-      $("toggleLog").addEventListener("click", () => ($("log").hidden = !$("log").hidden));
+      $("toggleLog").addEventListener("click", () => setLogOpen($("log").hidden));
       $("newChat").addEventListener("click", async () => {
         try {
           await api("reset");
           $("log").textContent = "";
-          $("log").hidden = true;
+          setLogOpen(false);
           $("toggleLog").hidden = true;
         } catch (err) {
           addLog({ kind: "error", text: err.message });
