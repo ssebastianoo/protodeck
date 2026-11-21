@@ -127,14 +127,23 @@
     return css.replace(URL_RE, (all, _q, u) => (map.has(u) ? `url("${map.get(u)}")` : all));
   }
 
-  function sheetText(sheet) {
-    // <style> text is kept as written; linked sheets are read rule by rule (@import followed).
-    if (sheet.ownerNode && sheet.ownerNode.tagName === "STYLE") return sheet.ownerNode.textContent;
+  /**
+   * One sheet's CSS with url() references inlined. <style> text is kept as written; linked sheets are
+   * read rule by rule, and @import-ed sheets are inlined against their own URL, not the parent's.
+   */
+  async function sheetCss(sheet, base) {
+    if (sheet.ownerNode && sheet.ownerNode.tagName === "STYLE") return inlineCssUrls(sheet.ownerNode.textContent, base);
+    let rules;
     try {
-      return [...sheet.cssRules].map((r) => (r.type === 3 && r.styleSheet ? sheetText(r.styleSheet) : r.cssText)).join("\n");
+      rules = [...sheet.cssRules];
     } catch {
       return "";
     }
+    const own = sheet.href || base;
+    const parts = await Promise.all(
+      rules.map((r) => (r.type === 3 && r.styleSheet ? sheetCss(r.styleSheet, r.styleSheet.href || own) : inlineCssUrls(r.cssText, own))),
+    );
+    return parts.join("\n");
   }
 
   /** All CSS that applies to the document, with url() references inlined. `skip(ownerNode)` leaves sheets out. */
@@ -143,7 +152,7 @@
     for (const sheet of doc.styleSheets) {
       if (skip && skip(sheet.ownerNode)) continue;
       const media = sheet.media && sheet.media.mediaText;
-      let text = await inlineCssUrls(sheetText(sheet), sheet.href || doc.baseURI);
+      let text = await sheetCss(sheet, doc.baseURI);
       if (media && media !== "all") text = `@media ${media} {\n${text}\n}`;
       out.push(text);
     }
@@ -316,6 +325,8 @@
 
     for (const n of out.querySelectorAll('link[rel~="stylesheet"], style[type="text/tailwindcss"], script[src^="/__protodeck/"]')) n.remove();
     for (const n of out.querySelectorAll("script:not([src])")) if (n.textContent.includes("__protodeckTheme")) n.remove();
+    // The screen's own <style> tags stay in place, but their url() references are inlined too.
+    await Promise.all([...out.querySelectorAll("style")].map(async (n) => (n.textContent = await inlineCssUrls(n.textContent, base))));
 
     const style = out.createElement("style");
     style.textContent = css;

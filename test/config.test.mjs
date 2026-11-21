@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { activeProviders, expandPath, loadConfig, parseProviders, saveProviders } from "../dist/config.js";
+import { activeProviders, changeProviders, expandPath, loadConfig, parseProviders, saveProviders } from "../dist/config.js";
 import { providerAgents } from "../dist/agent.js";
 
 function sandbox() {
@@ -81,4 +81,19 @@ test("providerAgents gives each provider its own id and config folder", () => {
   assert.deepEqual(agents.map((a) => [a.id, a.kind, a.label]), [["claude:Work", "claude", "Work"], ["codex:Alt", "codex", "Alt"]]);
   assert.deepEqual(dirs, { "claude:Work": "/h/.claude-work", "codex:Alt": "/nowhere" });
   assert.equal(agents[1].models[0].id, ""); // no cached models in that folder: Default only
+});
+
+test("changeProviders applies to the current file and refuses a broken one", () => {
+  const { project } = sandbox();
+  const file = join(project, ".protodeck", "config.json");
+  changeProviders("local", project, { add: work });
+  // Edited elsewhere after the gallery loaded it: the next change keeps that edit.
+  writeFileSync(file, JSON.stringify({ providers: [work, { name: "Side", agent: "codex", configDir: "~/.codex-side" }] }));
+  changeProviders("local", project, { remove: "work" });
+  assert.deepEqual(JSON.parse(readFileSync(file, "utf8")).providers.map((p) => p.name), ["Side"]);
+
+  // One invalid entry: adding must not replace the valid ones.
+  writeFileSync(file, JSON.stringify({ providers: [work, { name: "Bad", agent: "claud", configDir: "x" }] }));
+  assert.throws(() => changeProviders("local", project, { add: { name: "New", agent: "claude", configDir: "y" } }), /Fix or delete it first/);
+  assert.equal(JSON.parse(readFileSync(file, "utf8")).providers.length, 2);
 });

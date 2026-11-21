@@ -134,3 +134,26 @@ export function saveProviders(scope: Scope, projectDir: string, providers: unkno
   mkdirSync(dirname(path), { recursive: true });
   writeFileSync(path, JSON.stringify(data, null, 2) + "\n");
 }
+
+/**
+ * Adds or removes one provider, applied to the file as it is now so edits made since the gallery
+ * loaded it are kept. Refuses when the file's current providers don't parse, so a broken entry
+ * is never replaced by a list that silently drops the valid ones.
+ */
+export function changeProviders(scope: Scope, projectDir: string, change: { add?: unknown; remove?: unknown }): void {
+  const path = configPath(scope, projectDir);
+  let current: Provider[];
+  try {
+    current = parseProviders(readFile(path) ?? {});
+  } catch (e: any) {
+    throw new Error(`${displayPath(path)}: ${e.message}. Fix or delete it first.`);
+  }
+  let next = current;
+  if (change.remove !== undefined) {
+    if (typeof change.remove !== "string") throw new Error("remove must be a provider name");
+    const name = change.remove.trim().toLowerCase();
+    next = next.filter((p) => p.name.toLowerCase() !== name);
+  }
+  if (change.add !== undefined) next = [...next, change.add as Provider];
+  saveProviders(scope, projectDir, next);
+}

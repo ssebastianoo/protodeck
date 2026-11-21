@@ -6,7 +6,7 @@ import { randomBytes } from "node:crypto";
 import { BINARY, TEXT, VERSION } from "./assets.generated.js";
 import { renderPage } from "./render.js";
 import { AgentRunner, providerAgents, type AgentChoice, type AgentEvent, type AgentInfo, type AgentOptions, type ChatContext } from "./agent.js";
-import { activeProviders, loadConfig, saveProviders, type ConfigState } from "./config.js";
+import { activeProviders, changeProviders, loadConfig, type ConfigState } from "./config.js";
 
 export interface ServerOptions {
   root: string; // absolute prototype folder
@@ -299,7 +299,7 @@ export class ProtoServer {
         const body = await this.readBody(req);
         if (body.scope !== "local" && body.scope !== "global") return this.json(res, 400, { error: "scope must be local or global" });
         try {
-          saveProviders(body.scope, this.projectDir, body.providers);
+          changeProviders(body.scope, this.projectDir, { add: body.add, remove: body.remove });
         } catch (e: any) {
           return this.json(res, 400, { error: e.message });
         }

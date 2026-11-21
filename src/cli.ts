@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmdirSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
 import { spawn } from "node:child_process";
 import { TEMPLATES, TEXT, VERSION } from "./assets.generated.js";
@@ -109,7 +109,25 @@ function installSkill(global: boolean): void {
     const p = join(base, dir, "protodeck", "SKILL.md");
     write(p, TEXT["SKILL.md"], true);
     console.log(`  skill  ${global ? p : relative(process.cwd(), p)}`);
+    removeOldSkill(join(base, dir, "prototype"), global);
   }
+}
+
+/** Older versions installed the skill as `prototype`. Removes that copy when protodeck wrote it. */
+function removeOldSkill(folder: string, global: boolean): void {
+  const file = join(folder, "SKILL.md");
+  let text: string;
+  try {
+    text = readFileSync(file, "utf8");
+  } catch {
+    return;
+  }
+  if (!/^---\s*\nname: prototype\s*\n/.test(text) || !text.includes("protodeck")) return;
+  rmSync(file, { force: true });
+  try {
+    rmdirSync(folder); // only when nothing else is in it
+  } catch {}
+  console.log(`  remove ${global ? file : relative(process.cwd(), file)} (old name)`);
 }
 
 function init(dirArg: string | undefined): void {

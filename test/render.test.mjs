@@ -75,6 +75,8 @@ test("agent choices are checked against the discovered models", async () => {
   assert.deepEqual(plain(r.resolve({ agent: "claude", model: "opus", effort: "high" })), { agent: "claude", model: "opus", effort: "high" });
   assert.throws(() => r.resolve({ agent: "claude", model: "--dangerous" }), /Unknown model/);
   assert.throws(() => r.resolve({ agent: "codex", effort: "high" }), /does not support/);
+  // A provider that was renamed or removed must not fall back to another account.
+  assert.throws(() => r.resolve({ agent: "claude:Gone" }), /Gone is no longer/);
 });
 
 test("codex models come from its local cache, listed ones only", async () => {

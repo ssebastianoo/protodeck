@@ -120,16 +120,19 @@
   // ---------- autofill ----------
   // Password managers pop suggestions over login forms in every frame, which is noise on a canvas
   // of prototypes. iCloud Passwords even focuses the login field by itself when the page loads,
-  // and the focus opens its popup. So focus that doesn't follow the user's own click, tap or key
-  // press is undone here before other listeners see it. This also stops prototypes' autofocus
-  // from pulling focus into a frame.
+  // and the focus opens its popup. So while the page loads, focus that doesn't follow the user's own
+  // click, tap or key press is undone here before other listeners see it. This also stops
+  // prototypes' autofocus from pulling focus into a frame. Later focus calls (a modal opening its
+  // search field after an animation) are left alone.
   let lastGesture = -Infinity;
+  const GUARD_MS = 2000;
   for (const type of ["pointerdown", "mousedown", "touchstart", "keydown"])
     window.addEventListener(type, () => (lastGesture = performance.now()), true);
   window.addEventListener(
     "focusin",
     (e) => {
-      if (performance.now() - lastGesture < 1000) return;
+      const now = performance.now();
+      if (now > GUARD_MS || now - lastGesture < 1000) return;
       const t = e.target;
       if (!t || !t.matches || !t.matches("input, textarea, select, [contenteditable]")) return;
       e.stopImmediatePropagation();
@@ -241,11 +244,13 @@
     true
   );
 
-  // Right-click opens the gallery's frame menu. Shift + right-click keeps the browser's own menu.
+  // Right-click opens the gallery's frame menu. Shift + right-click keeps the browser's own menu, and
+  // frames without a gallery menu (component previews) keep it too.
+  let hasMenu = false;
   document.addEventListener(
     "contextmenu",
     (e) => {
-      if (e.shiftKey) return;
+      if (e.shiftKey || !hasMenu) return;
       e.preventDefault();
       if (picking) return;
       send({ type: "protodeck:contextmenu", x: e.clientX, y: e.clientY });
@@ -320,6 +325,7 @@
       }
     } else if (d.type === "protodeck:theme") {
       setTheme(d.theme);
+      if (d.menu) hasMenu = true;
     } else if (d.type === "protodeck:highlight") {
       if (!d.selector) {
         selected = null;

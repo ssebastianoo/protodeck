@@ -231,8 +231,9 @@ export class AgentRunner {
 
   /** Checks a choice from the browser against the discovered agents, so only known values reach argv. */
   resolve(choice: Partial<AgentChoice> | undefined): Required<AgentChoice> & { info: AgentInfo } {
-    const agent = this.opts.agents.find((a) => a.id === choice?.agent) ?? this.opts.agents[0];
-    if (!agent) throw new Error("No agent configured");
+    // An unknown id means the provider was renamed or removed: don't quietly run another account.
+    const agent = choice?.agent ? this.opts.agents.find((a) => a.id === choice.agent) : this.opts.agents[0];
+    if (!agent) throw new Error(choice?.agent ? `${choice.agent.replace(/^\w+:/, "")} is no longer in the provider list. Pick another agent.` : "No agent configured");
     const model = agent.models.find((m) => m.id === (choice?.model ?? ""));
     if (!model) throw new Error(`Unknown model for ${agent.label}: ${choice?.model}`);
     const effort = choice?.effort ?? "";
@@ -275,9 +276,11 @@ export class AgentRunner {
   run(ctx: ChatContext, choice?: Partial<AgentChoice>): void {
     if (this.child) throw new Error("The agent is still working on the previous instruction");
     const c = this.resolve(choice);
-    if (this.sessionAgent !== c.agent) {
+    // A session lives in one config folder, so a provider pointed at a new folder starts fresh.
+    const sessionKey = `${c.agent}\0${this.opts.dirs?.[c.agent] ?? ""}`;
+    if (this.sessionAgent !== sessionKey) {
       this.sessionId = null;
-      this.sessionAgent = c.agent;
+      this.sessionAgent = sessionKey;
     }
     this.runningKind = c.info.kind;
     const prompt = buildPrompt(ctx, this.opts.protoRel);

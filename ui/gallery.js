@@ -571,7 +571,8 @@
     const d = e.data;
     switch (d.type) {
       case "protodeck:ready":
-        post(frame, { type: "protodeck:theme", theme: currentTheme() });
+        // menu: this frame's right-clicks open the gallery's frame menu (component frames have none).
+        post(frame, { type: "protodeck:theme", theme: currentTheme(), menu: true });
         if (state.picking) post(frame, { type: "protodeck:pick", on: true });
         if (state.selection && state.selection.screen === info.screen && state.selection.device === info.device)
           post(frame, { type: "protodeck:highlight", selector: state.selection.selector });
@@ -954,7 +955,7 @@
         zoomKey(e.key);
         return;
       }
-      if (isTyping(e.target) || e.altKey || mod || PICKERS.some((p) => !$(p + "Menu").hidden) || !$("modelMenu").hidden) return;
+      if (isTyping(e.target) || e.altKey || mod || PICKERS.some((p) => !$(p + "Menu").hidden) || !$("modelMenu").hidden || !$("frameMenu").hidden) return;
       if (e.key === " ") {
         if (e.target.closest && e.target.closest("button, a, [role=button]")) return;
         e.preventDefault();
@@ -992,12 +993,12 @@
       .replace(/\*\*([^*\n]+)\*\*/g, "<strong>$1</strong>");
   }
 
-  function addLog(ev, scroll = true) {
   function setLogOpen(open) {
     $("log").hidden = !open;
     $("toggleLog").setAttribute("aria-expanded", String(open));
   }
 
+  function addLog(ev, scroll = true) {
     const log = $("log");
     const n = el("div", "msg msg-" + (ev.kind === "start" ? "user" : ev.kind));
     if (ev.kind === "done") n.textContent = ev.text || "Done";
@@ -1239,12 +1240,13 @@
     paintChoice();
   }
 
-  async function saveProviders(providers) {
+  /** Sends one change ({ add } or { remove }); the server applies it to the file as it is now. */
+  async function saveProviders(change) {
     prov.saving = true;
     prov.error = "";
     renderMenu();
     try {
-      const data = await api("config", { scope: prov.scope, providers });
+      const data = await api("config", { scope: prov.scope, ...change });
       prov.config = data.config;
       setAgents(data.agents);
       prov.saving = false;
@@ -1314,8 +1316,8 @@
     if (info.error) add(body, "p", "settings-err", { textContent: info.error });
 
     const list = add(body, "div", "provider-list");
-    if (!info.providers.length) add(list, "p", "menu-empty", { textContent: "No providers yet. Claude Code and Codex use their default folders." });
-    info.providers.forEach((p, i) => {
+    if (!info.providers.length && !info.error) add(list, "p", "menu-empty", { textContent: "No providers yet. Claude Code and Codex use their default folders." });
+    info.providers.forEach((p) => {
       const row = add(list, "div", "provider-row");
       row.appendChild(agentMark({ kind: p.agent, provider: p }));
       const text = add(row, "div", "provider-text");
@@ -1323,7 +1325,7 @@
       add(text, "code", "", { textContent: `${KIND_LABELS[p.agent]} · ${p.configDir}` });
       const rm = add(row, "button", "remove", { type: "button", textContent: "×", title: `Remove ${p.name}`, disabled: prov.saving });
       rm.setAttribute("aria-label", `Remove ${p.name}`);
-      rm.addEventListener("click", () => saveProviders(info.providers.filter((_, j) => j !== i)));
+      rm.addEventListener("click", () => saveProviders({ remove: p.name }));
     });
 
     const d = prov.draft;
@@ -1340,7 +1342,7 @@
     });
     const actions = add(form, "div", "actions full");
     if (prov.error) add(actions, "span", "settings-err", { textContent: prov.error });
-    add(actions, "button", "btn primary", { type: "submit", textContent: prov.saving ? "Saving…" : "Add provider", disabled: prov.saving });
+    add(actions, "button", "btn primary", { type: "submit", textContent: prov.saving ? "Saving…" : "Add provider", disabled: prov.saving || !!info.error });
     agentSel.addEventListener("change", () => {
       d.agent = agentSel.value;
       renderMenu();
@@ -1355,7 +1357,7 @@
         prov.error = "Enter a name and a config folder.";
         return renderMenu();
       }
-      if (await saveProviders([...info.providers, entry])) {
+      if (await saveProviders({ add: entry })) {
         d.name = "";
         d.configDir = "";
         renderMenu();
