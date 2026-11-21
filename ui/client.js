@@ -117,8 +117,62 @@
     return s;
   }
 
+  // ---------- autofill ----------
+  // Password managers pop suggestions over login forms in every frame, which is noise on a canvas
+  // of prototypes. iCloud Passwords even focuses the login field by itself when the page loads,
+  // and the focus opens its popup. So while the page loads, focus that doesn't follow the user's own
+  // click, tap or key press is undone here before other listeners see it. This also stops
+  // prototypes' autofocus from pulling focus into a frame. Later focus calls (a modal opening its
+  // search field after an animation) are left alone.
+  let lastGesture = -Infinity;
+  const GUARD_MS = 2000;
+  for (const type of ["pointerdown", "mousedown", "touchstart", "keydown"])
+    window.addEventListener(type, () => (lastGesture = performance.now()), true);
+  window.addEventListener(
+    "focusin",
+    (e) => {
+      const now = performance.now();
+      if (now > GUARD_MS || now - lastGesture < 1000) return;
+      const t = e.target;
+      if (!t || !t.matches || !t.matches("input, textarea, select, [contenteditable]")) return;
+      e.stopImmediatePropagation();
+      t.blur();
+    },
+    true
+  );
+
+  // Fields also opt out of autofill for managers that respect these attributes (1Password,
+  // LastPass, Bitwarden). They are stripped again from the HTML sent to the agent, so they never
+  // end up in the screen files.
+  const AF_ATTRS = { autocomplete: "off", "data-1p-ignore": "", "data-lpignore": "true", "data-bwignore": "", "data-form-type": "other" };
+  const AF_MARK = "data-protodeck-af";
+  const FIELDS = "form, input, textarea, select";
+  function quietField(el) {
+    if (el.hasAttribute(AF_MARK)) return;
+    const added = Object.keys(AF_ATTRS).filter((a) => !el.hasAttribute(a));
+    for (const a of added) el.setAttribute(a, AF_ATTRS[a]);
+    el.setAttribute(AF_MARK, added.join(" "));
+  }
+  function quietAutofill(root) {
+    if (root.matches && root.matches(FIELDS)) quietField(root);
+    if (root.querySelectorAll) for (const el of root.querySelectorAll(FIELDS)) quietField(el);
+  }
+  function unquiet(root) {
+    for (const el of [root, ...root.querySelectorAll("[" + AF_MARK + "]")]) {
+      const added = el.getAttribute && el.getAttribute(AF_MARK);
+      if (added == null) continue;
+      for (const a of added.split(" ")) if (a) el.removeAttribute(a);
+      el.removeAttribute(AF_MARK);
+    }
+    return root;
+  }
+  quietAutofill(document);
+  new MutationObserver((muts) => {
+    for (const m of muts) for (const n of m.addedNodes) if (n.nodeType === 1) quietAutofill(n);
+  }).observe(document.documentElement, { childList: true, subtree: true });
+
   function htmlOf(node) {
-    let html = node.outerHTML.replace(/<!--\/?x:[\w-]+-->/g, "");
+    let html = unquiet(node.cloneNode(true)).outerHTML.replace(/<!--\/?x:[\w-]+-->/g, "");
     if (html.length > 4000) html = html.slice(0, 4000) + "\n<!-- … truncated … -->";
     return html;
   }
@@ -190,6 +244,20 @@
     true
   );
 
+  // Right-click opens the gallery's frame menu. Shift + right-click keeps the browser's own menu, and
+  // frames without a gallery menu (component previews) keep it too.
+  let hasMenu = false;
+  document.addEventListener(
+    "contextmenu",
+    (e) => {
+      if (e.shiftKey || !hasMenu) return;
+      e.preventDefault();
+      if (picking) return;
+      send({ type: "protodeck:contextmenu", x: e.clientX, y: e.clientY });
+    },
+    true
+  );
+
   document.addEventListener(
     "click",
     (e) => {
@@ -257,6 +325,7 @@
       }
     } else if (d.type === "protodeck:theme") {
       setTheme(d.theme);
+      if (d.menu) hasMenu = true;
     } else if (d.type === "protodeck:highlight") {
       if (!d.selector) {
         selected = null;

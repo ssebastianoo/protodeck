@@ -66,6 +66,7 @@
       return Array.isArray(r) && r.length ? new Set(r) : null; // null = all routes
     })(),
     current: null, // { screen, device }
+    deselected: false, // true after the user clears the target, so renders don't pick a default
     selection: null, // { screen, device, selector, html, components }
     picking: false,
     busy: false,
@@ -167,6 +168,13 @@
     fig.append(sizer, cap);
     state.frames.set(frame, { screen: screen.path, device: device.id, figure: fig });
     fig.addEventListener("click", () => setCurrent(screen.path, device.id));
+    // Right-clicks inside the frame arrive as protodeck:contextmenu; this covers the bezel and caption.
+    fig.addEventListener("contextmenu", (e) => {
+      if (e.shiftKey) return;
+      e.preventDefault();
+      setCurrent(screen.path, device.id);
+      openFrameMenu(screen.path, device.id, e.clientX, e.clientY);
+    });
     return fig;
   }
 
@@ -228,7 +236,9 @@
     $("empty").hidden = state.screens.length > 0;
     const n = state.screens.length;
     $("summary").textContent = shown.length < n ? `${shown.length} of ${n} screens` : `${n} screen${n === 1 ? "" : "s"}`;
-    if (!state.current || !shown.some((s) => s.path === state.current.screen)) {
+    // After the user clears the target by clicking the background, keep it cleared until a frame is clicked.
+    if (!state.current && state.deselected) state.current = null;
+    else if (!state.current || !shown.some((s) => s.path === state.current.screen)) {
       const first = shown[0];
       const dev = DEVICES.find((d) => state.enabled.has(d.id));
       state.current = first && dev ? { screen: first.path, device: dev.id } : null;
@@ -487,7 +497,16 @@
   function setCurrent(screen, device) {
     if (state.current && state.current.screen === screen && state.current.device === device) return;
     state.current = { screen, device };
+    state.deselected = false;
     if (state.selection && (state.selection.screen !== screen || state.selection.device !== device)) clearSelection();
+    paintCurrent();
+  }
+
+  function clearCurrent() {
+    if (!state.current) return;
+    clearSelection();
+    state.current = null;
+    state.deselected = true;
     paintCurrent();
   }
 
@@ -552,7 +571,8 @@
     const d = e.data;
     switch (d.type) {
       case "protodeck:ready":
-        post(frame, { type: "protodeck:theme", theme: currentTheme() });
+        // menu: this frame's right-clicks open the gallery's frame menu (component frames have none).
+        post(frame, { type: "protodeck:theme", theme: currentTheme(), menu: true });
         if (state.picking) post(frame, { type: "protodeck:pick", on: true });
         if (state.selection && state.selection.screen === info.screen && state.selection.device === info.device)
           post(frame, { type: "protodeck:highlight", selector: state.selection.selector });
@@ -577,9 +597,89 @@
       case "protodeck:cancel":
         setPicking(false);
         break;
+      case "protodeck:contextmenu": {
+        // Frame coordinates are in the frame's own pixels; the frame is scaled on the canvas.
+        const r = frame.getBoundingClientRect();
+        const s = frame.offsetWidth ? r.width / frame.offsetWidth : 1;
+        setCurrent(info.screen, info.device);
+        openFrameMenu(info.screen, info.device, r.left + (Number(d.x) || 0) * s, r.top + (Number(d.y) || 0) * s);
+        break;
+      }
 
     }
   });
+
+  // ---------- frame context menu ----------
+  const MENU_ICONS = {
+    png: '<path d="M2.5 4.5a2 2 0 0 1 2-2h7a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2h-7a2 2 0 0 1-2-2v-7Z" fill="none" stroke="currentColor" stroke-width="1.4"/><circle cx="6" cy="6.2" r="1.1" fill="currentColor"/><path d="m3 12 3.2-3.2 2.3 2.3 1.8-1.8L13 12" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/>',
+    html: '<path d="M5.5 4.5 2 8l3.5 3.5M10.5 4.5 14 8l-3.5 3.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>',
+    open: '<path d="M9 2.5h4.5V7M13.5 2.5 7.5 8.5M11.5 9.5v3a1 1 0 0 1-1 1h-7a1 1 0 0 1-1-1v-7a1 1 0 0 1 1-1h3" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>',
+  };
+
+  function closeFrameMenu() {
+    const menu = $("frameMenu");
+    if (menu) menu.hidden = true;
+  }
+
+  function openFrameMenu(screenPath, deviceId, x, y) {
+    const screen = screenByPath(screenPath);
+    const device = deviceById(deviceId);
+    if (!screen || !device) return;
+    openPicker(null);
+    const menu = $("frameMenu");
+    menu.textContent = "";
+    menu.appendChild(Object.assign(el("div", "menu-label"), { textContent: `${screen.title} · ${device.name}` }));
+    const item = (icon, label, hint, run) => {
+      const b = el("button", "menu-item", { type: "button", role: "menuitem" });
+      b.innerHTML = `<svg class="icon" viewBox="0 0 16 16" width="14" height="14" aria-hidden="true">${MENU_ICONS[icon]}</svg><span class="name"></span>`;
+      b.querySelector(".name").textContent = label;
+      if (hint) b.appendChild(Object.assign(el("span", "hint"), { textContent: hint }));
+      b.addEventListener("click", () => {
+        closeFrameMenu();
+        run();
+      });
+      menu.appendChild(b);
+      return b;
+    };
+    const job = (format) => () => window.__protodeckExport.exportFrame({ screen, device, format, theme: currentTheme() });
+    const first = item("png", "Download PNG", `${device.w}×${device.h}`, job("png"));
+    item("html", "Download HTML", "", job("html"));
+    menu.appendChild(el("div", "sep"));
+    item("open", "Open in new tab", "", () => window.open("/" + screen.path, "_blank", "noopener"));
+    menu.hidden = false;
+    // Keep the menu inside the window.
+    const w = menu.offsetWidth;
+    const h = menu.offsetHeight;
+    menu.style.left = Math.max(8, Math.min(x, innerWidth - w - 8)) + "px";
+    menu.style.top = Math.max(8, Math.min(y, innerHeight - h - 8)) + "px";
+    first.focus({ preventScroll: true });
+  }
+
+  function initFrameMenu() {
+    const menu = $("frameMenu");
+    document.addEventListener("pointerdown", (e) => {
+      if (!menu.hidden && !menu.contains(e.target)) closeFrameMenu();
+    });
+    document.addEventListener("keydown", (e) => {
+      if (menu.hidden) return;
+      if (e.key === "Escape") {
+        e.preventDefault();
+        closeFrameMenu();
+      } else if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+        e.preventDefault();
+        const items = [...menu.querySelectorAll(".menu-item")];
+        const i = items.indexOf(document.activeElement);
+        items[(i + (e.key === "ArrowDown" ? 1 : items.length - 1)) % items.length].focus();
+      }
+    });
+    window.addEventListener("blur", closeFrameMenu);
+    window.addEventListener("resize", closeFrameMenu);
+    $("canvas").addEventListener("scroll", closeFrameMenu, { passive: true });
+    // The background has no menu of its own; don't show the browser's there either.
+    $("canvas").addEventListener("contextmenu", (e) => {
+      if (!e.shiftKey && !e.target.closest("a")) e.preventDefault();
+    });
+  }
 
   // ---------- live reload ----------
   function reloadFor(files) {
@@ -620,8 +720,18 @@
       reloadFor(data.files);
     });
     es.addEventListener("agent", (e) => onAgent(JSON.parse(e.data)));
+    es.addEventListener("agents", (e) => {
+      setAgents(JSON.parse(e.data).agents);
+      renderMenu();
+    });
     let wasDown = false;
-    es.addEventListener("hello", () => {
+    es.addEventListener("hello", (e) => {
+      // A restarted server has a new token (and maybe new UI code): reload, or every POST fails with "Bad token".
+      let hello = {};
+      try {
+        hello = JSON.parse(e.data);
+      } catch {}
+      if (hello.instance && BOOT.instance && hello.instance !== BOOT.instance) return location.reload();
       if (wasDown) loadState(true);
       wasDown = false;
     });
@@ -742,12 +852,47 @@
     else if (!gesture.active) wheelZoom(Number(d.deltaY) || 0, Number(d.deltaMode) || 0, x, y);
   }
 
+  // ---------- infinite canvas ----------
+  // The stage gets empty slack on every side, and more is added whenever a scroll gets near an edge,
+  // so panning never stops. Growing the left or top side shifts the scroll position to match.
+  const SLACK = 20000;
+  const ext = { t: SLACK, r: SLACK, b: SLACK, l: SLACK };
+  function applyExt() {
+    const st = $("stage").style;
+    for (const k in ext) st.setProperty("--ext-" + k, ext[k] + "px");
+  }
+  function growCanvas() {
+    const c = $("canvas");
+    const w = c.clientWidth;
+    const h = c.clientHeight;
+    let dx = 0;
+    let dy = 0;
+    if (c.scrollLeft < w) (ext.l += SLACK), (dx = SLACK);
+    if (c.scrollTop < h) (ext.t += SLACK), (dy = SLACK);
+    const growR = c.scrollWidth - c.scrollLeft - w < w;
+    const growB = c.scrollHeight - c.scrollTop - h < h;
+    if (growR) ext.r += SLACK;
+    if (growB) ext.b += SLACK;
+    if (!dx && !dy && !growR && !growB) return;
+    applyExt();
+    if (dx) c.scrollLeft += dx;
+    if (dy) c.scrollTop += dy;
+  }
+  /** Scrolls back to the screens' top-left corner. */
+  function goHome(smooth) {
+    $("canvas").scrollTo({ left: ext.l, top: ext.t, behavior: smooth ? "smooth" : "auto" });
+  }
+
   const isTyping = (t) => !!(t && t.closest && t.closest("input, textarea, select, [contenteditable=''], [contenteditable='true']"));
 
   function initCanvas() {
     const canvas = $("canvas");
     $("zoom").value = state.size;
     $("zoom").addEventListener("input", (e) => zoomTo(Number(e.target.value)));
+
+    applyExt();
+    goHome(false);
+    canvas.addEventListener("scroll", growCanvas, { passive: true });
 
     // Pinch on a trackpad and Ctrl/⌘ + wheel zoom; plain wheel and two-finger swipes scroll natively.
     canvas.addEventListener(
@@ -779,7 +924,10 @@
       const middle = e.button === 1 && !e.target.closest("a");
       if (!(space || middle || (e.button === 0 && onBackground))) return;
       e.preventDefault();
-      drag = { id: e.pointerId, x: e.clientX, y: e.clientY };
+      // preventDefault keeps focus where it was, so a field focused inside a frame would keep
+      // reopening the browser's autofill popup while the canvas pans. Move focus out of frames.
+      if (document.activeElement && document.activeElement.tagName === "IFRAME") document.activeElement.blur();
+      drag = { id: e.pointerId, x: e.clientX, y: e.clientY, sx: e.clientX, sy: e.clientY, click: e.button === 0 && onBackground && !space };
       canvas.setPointerCapture(e.pointerId);
       canvas.classList.add("panning");
     });
@@ -792,6 +940,8 @@
     });
     const endDrag = (e) => {
       if (!drag || e.pointerId !== drag.id) return;
+      // A plain click on the background (no pan) clears the target frame.
+      if (e.type === "pointerup" && drag.click && Math.hypot(e.clientX - drag.sx, e.clientY - drag.sy) < 4) clearCurrent();
       drag = null;
       canvas.classList.remove("panning");
     };
@@ -805,11 +955,17 @@
         zoomKey(e.key);
         return;
       }
-      if (isTyping(e.target) || e.altKey || mod || PICKERS.some((p) => !$(p + "Menu").hidden) || !$("modelMenu").hidden) return;
+      if (isTyping(e.target) || e.altKey || mod || PICKERS.some((p) => !$(p + "Menu").hidden) || !$("modelMenu").hidden || !$("frameMenu").hidden) return;
       if (e.key === " ") {
         if (e.target.closest && e.target.closest("button, a, [role=button]")) return;
         e.preventDefault();
         if (!e.repeat) setSpace(true);
+        return;
+      }
+      // Shift+1 jumps back to the screens.
+      if (e.shiftKey && e.code === "Digit1") {
+        e.preventDefault();
+        goHome(true);
         return;
       }
       const step = e.shiftKey ? 400 : 80;
@@ -837,6 +993,11 @@
       .replace(/\*\*([^*\n]+)\*\*/g, "<strong>$1</strong>");
   }
 
+  function setLogOpen(open) {
+    $("log").hidden = !open;
+    $("toggleLog").setAttribute("aria-expanded", String(open));
+  }
+
   function addLog(ev, scroll = true) {
     const log = $("log");
     const n = el("div", "msg msg-" + (ev.kind === "start" ? "user" : ev.kind));
@@ -861,6 +1022,7 @@
   }
 
   // ---------- agent and model picker ----------
+  // Mutable: providers from .protodeck/config.json can be added or removed while the gallery is open.
   const AGENTS = BOOT.agents || [];
   const EFFORT_LABELS = { minimal: "Minimal", low: "Low", medium: "Medium", high: "High", xhigh: "Extra high", max: "Max", ultra: "Ultra" };
   const effortLabel = (e) => (e ? EFFORT_LABELS[e] || e[0].toUpperCase() + e.slice(1) : "Default");
@@ -878,7 +1040,16 @@
     m.innerHTML = MARKS[kind] || MARKS.custom;
     return m;
   }
-  const agentOf = (kind) => AGENTS.find((a) => a.kind === kind);
+  /** Mark for an agent; providers get a letter badge so two Claude accounts can be told apart. */
+  function agentMark(agent) {
+    const m = mark(agent.kind);
+    if (agent.provider) {
+      m.classList.add("has-badge");
+      m.appendChild(Object.assign(el("span", "mark-badge"), { textContent: agent.provider.name.trim()[0].toUpperCase() }));
+    }
+    return m;
+  }
+  const agentOf = (id) => AGENTS.find((a) => a.id === id);
   const modelOf = (agent, id) => agent && agent.models.find((m) => m.id === id);
 
   /** Keeps a stored or partial choice valid against the agents the server found. */
@@ -888,18 +1059,18 @@
     const model = modelOf(agent, c && c.model) || agent.models[0];
     let effort = c && c.effort;
     if (effort && !model.efforts.includes(effort)) effort = model.efforts.includes(model.defaultEffort) ? model.defaultEffort : "";
-    return { agent: agent.kind, model: model.id, effort: effort || "" };
+    return { agent: agent.id, model: model.id, effort: effort || "" };
   }
 
-  const picker = { choice: normalizeChoice(store.get("choice", null)), view: null, query: "", active: 0 };
+  const picker = { choice: normalizeChoice(store.get("choice", null)), view: null, query: "", active: 0, mode: "models" };
 
   function paintChoice() {
     const c = picker.choice;
     if (!c) return;
     const agent = agentOf(c.agent);
     const model = modelOf(agent, c.model);
-    $("modelMark").replaceWith(Object.assign(mark(c.agent), { id: "modelMark" }));
-    const name = model.id ? model.label : agent.label;
+    $("modelMark").replaceWith(Object.assign(agentMark(agent), { id: "modelMark" }));
+    const name = model.id ? (agent.provider ? `${model.label} (${agent.label})` : model.label) : agent.label;
     $("modelLabel").textContent = c.effort ? `${name} · ${effortLabel(c.effort)}` : name;
     $("modelBtn").title = `${agent.label}${model.id ? " · " + model.label : ""} · reasoning ${effortLabel(c.effort).toLowerCase()}`;
   }
@@ -922,18 +1093,31 @@
     const c = picker.choice;
     const rail = $("agentRail");
     rail.textContent = "";
+    const settings = picker.mode === "settings";
+    $("modelMenu").classList.toggle("settings", settings);
     for (const a of AGENTS) {
-      const b = el("button", "rail-btn", { type: "button", title: a.label, "aria-label": a.label });
-      b.setAttribute("aria-current", String(a.kind === picker.view));
-      b.appendChild(mark(a.kind));
+      const title = a.provider ? `${a.label} · ${a.provider.configDir}` : a.label;
+      const b = el("button", "rail-btn", { type: "button", title, "aria-label": a.label });
+      b.setAttribute("aria-current", String(!settings && a.id === picker.view));
+      b.appendChild(agentMark(a));
       b.addEventListener("click", () => {
-        picker.view = a.kind;
+        picker.view = a.id;
         picker.active = 0;
+        picker.mode = "models";
         renderMenu();
         $("modelSearch").focus();
       });
       rail.appendChild(b);
     }
+    if (BOOT.providers !== false) {
+      rail.appendChild(el("span", "rail-spacer"));
+      const gear = el("button", "rail-btn rail-gear", { type: "button", title: "Providers: add another account or config folder", "aria-label": "Providers" });
+      gear.setAttribute("aria-current", String(settings));
+      gear.innerHTML = GEAR;
+      gear.addEventListener("click", () => openSettings(!settings));
+      rail.appendChild(gear);
+    }
+    if (settings) return renderSettings();
 
     const list = $("modelList");
     list.textContent = "";
@@ -944,7 +1128,7 @@
       const selected = c.agent === picker.view && c.model === m.id;
       const b = el("button", "menu-item" + (i === picker.active ? " active" : ""), { type: "button", role: "option" });
       b.setAttribute("aria-selected", String(selected));
-      b.appendChild(mark(picker.view));
+      b.appendChild(agentMark(agentOf(picker.view)));
       b.appendChild(Object.assign(el("span", "name"), { textContent: m.id ? m.label : `Default` }));
       if (!m.id) b.appendChild(Object.assign(el("span", "hint"), { textContent: "agent setting" }));
       b.insertAdjacentHTML("beforeend", CHECK);
@@ -1003,6 +1187,7 @@
     $("modelBtn").setAttribute("aria-expanded", String(open));
     if (open) {
       picker.view = picker.choice.agent;
+      picker.mode = "models";
       picker.query = "";
       picker.active = Math.max(0, agentOf(picker.view).models.findIndex((m) => m.id === picker.choice.model));
       $("modelSearch").value = "";
@@ -1012,6 +1197,172 @@
       const items = $("modelList").children;
       if (items[picker.active]) items[picker.active].scrollIntoView({ block: "nearest" });
     }
+  }
+
+  // ---------- providers (.protodeck/config.json) ----------
+  // Lucide "settings" (ISC).
+  const GEAR =
+    '<svg viewBox="0 0 24 24" width="17" height="17" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>';
+  const KIND_LABELS = { claude: "Claude Code", codex: "Codex" };
+  const DIR_HINT = { claude: "~/.claude-work", codex: "~/.codex-work" };
+  const SCOPES = {
+    local: { label: "This project", note: "Used only in this project." },
+    global: { label: "Global", note: "Used in every project without its own file." },
+  };
+  // config: { active, local: {path, exists, providers, error}, global: {...} }; scope: the file being edited.
+  const prov = { config: null, scope: null, error: "", draft: { agent: "claude", name: "", configDir: "" }, saving: false };
+
+  async function openSettings(open) {
+    picker.mode = open ? "settings" : "models";
+    if (open) {
+      prov.error = "";
+      try {
+        const data = await fetch("/__protodeck/config").then((r) => r.json());
+        prov.config = data.config;
+        setAgents(data.agents);
+        prov.scope = prov.config.active; // null: nothing saved yet, so ask where to save
+      } catch (err) {
+        prov.error = "Could not load the config: " + err.message;
+      }
+    }
+    renderMenu();
+    if (!open) $("modelSearch").focus();
+  }
+
+  /** Replaces the agent list in place and keeps the current choice valid. */
+  function setAgents(agents) {
+    if (!agents) return;
+    AGENTS.splice(0, AGENTS.length, ...agents);
+    if (!AGENTS.length) return;
+    picker.choice = normalizeChoice(picker.choice);
+    store.set("choice", picker.choice);
+    if (!agentOf(picker.view)) picker.view = picker.choice.agent;
+    paintChoice();
+  }
+
+  /** Sends one change ({ add } or { remove }); the server applies it to the file as it is now. */
+  async function saveProviders(change) {
+    prov.saving = true;
+    prov.error = "";
+    renderMenu();
+    try {
+      const data = await api("config", { scope: prov.scope, ...change });
+      prov.config = data.config;
+      setAgents(data.agents);
+      prov.saving = false;
+      return true;
+    } catch (err) {
+      prov.error = err.message;
+      prov.saving = false;
+      return false;
+    } finally {
+      renderMenu();
+    }
+  }
+
+  function renderSettings() {
+    const body = $("providerBody");
+    body.textContent = "";
+    const cfg = prov.config;
+    const add = (parent, tag, cls, props) => parent.appendChild(Object.assign(el(tag, cls), props || {}));
+    if (!cfg) {
+      add(body, "p", "settings-err", { textContent: prov.error || "Loading…" });
+      return;
+    }
+
+    // Nothing saved anywhere yet: ask where the file should go before showing the editor.
+    if (!prov.scope) {
+      add(body, "p", "settings-intro", {
+        textContent: "Add another account or config folder for Claude Code or Codex, e.g. a work account in ~/.claude-work. Where should protodeck save it?",
+      });
+      for (const scope of ["local", "global"]) {
+        const b = add(body, "button", "scope-option", { type: "button" });
+        add(b, "span", "name", { textContent: SCOPES[scope].label });
+        add(b, "code", "", { textContent: cfg[scope].path });
+        add(b, "span", "hint", { textContent: SCOPES[scope].note });
+        b.addEventListener("click", () => {
+          prov.scope = scope;
+          renderMenu();
+          const n = $("providerName");
+          if (n) n.focus();
+        });
+      }
+      return;
+    }
+
+    const tabs = add(body, "div", "scope-tabs", { role: "tablist" });
+    for (const scope of ["local", "global"]) {
+      const t = add(tabs, "button", "scope-tab", { type: "button", role: "tab" });
+      t.setAttribute("aria-selected", String(prov.scope === scope));
+      add(t, "span", "", { textContent: SCOPES[scope].label });
+      if (cfg.active === scope) add(t, "span", "in-use", { textContent: "in use" });
+      t.addEventListener("click", () => {
+        prov.scope = scope;
+        prov.error = "";
+        renderMenu();
+      });
+    }
+
+    const info = cfg[prov.scope];
+    const where = add(body, "p", "settings-path");
+    add(where, "code", "", { textContent: info.path });
+    if (cfg.active && cfg.active !== prov.scope)
+      add(body, "p", "settings-note", {
+        textContent:
+          prov.scope === "global"
+            ? "Not used here: this project has its own file, which takes precedence."
+            : "Saving here gives this project its own file, used instead of the global one.",
+      });
+    if (info.error) add(body, "p", "settings-err", { textContent: info.error });
+
+    const list = add(body, "div", "provider-list");
+    if (!info.providers.length && !info.error) add(list, "p", "menu-empty", { textContent: "No providers yet. Claude Code and Codex use their default folders." });
+    info.providers.forEach((p) => {
+      const row = add(list, "div", "provider-row");
+      row.appendChild(agentMark({ kind: p.agent, provider: p }));
+      const text = add(row, "div", "provider-text");
+      add(text, "span", "name", { textContent: p.name });
+      add(text, "code", "", { textContent: `${KIND_LABELS[p.agent]} · ${p.configDir}` });
+      const rm = add(row, "button", "remove", { type: "button", textContent: "×", title: `Remove ${p.name}`, disabled: prov.saving });
+      rm.setAttribute("aria-label", `Remove ${p.name}`);
+      rm.addEventListener("click", () => saveProviders({ remove: p.name }));
+    });
+
+    const d = prov.draft;
+    const form = add(body, "form", "provider-form");
+    const agentSel = add(form, "select", "", { id: "providerAgent" });
+    agentSel.setAttribute("aria-label", "Agent");
+    for (const k of ["claude", "codex"]) agentSel.appendChild(Object.assign(el("option"), { value: k, textContent: KIND_LABELS[k], selected: d.agent === k }));
+    const name = add(form, "input", "", { id: "providerName", placeholder: "Name, e.g. Work", value: d.name, maxLength: 40, autocomplete: "off", spellcheck: false });
+    name.setAttribute("aria-label", "Name");
+    const dir = add(form, "input", "full", { placeholder: `Config folder, e.g. ${DIR_HINT[d.agent]}`, value: d.configDir, autocomplete: "off", spellcheck: false });
+    dir.setAttribute("aria-label", "Config folder");
+    add(form, "p", "hint full", {
+      textContent: d.agent === "claude" ? "Passed to claude as CLAUDE_CONFIG_DIR. Log in once with: CLAUDE_CONFIG_DIR=<folder> claude" : "Passed to codex as CODEX_HOME. Log in once with: CODEX_HOME=<folder> codex login",
+    });
+    const actions = add(form, "div", "actions full");
+    if (prov.error) add(actions, "span", "settings-err", { textContent: prov.error });
+    add(actions, "button", "btn primary", { type: "submit", textContent: prov.saving ? "Saving…" : "Add provider", disabled: prov.saving || !!info.error });
+    agentSel.addEventListener("change", () => {
+      d.agent = agentSel.value;
+      renderMenu();
+      $("providerAgent").focus();
+    });
+    name.addEventListener("input", () => (d.name = name.value));
+    dir.addEventListener("input", () => (d.configDir = dir.value));
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const entry = { agent: d.agent, name: d.name.trim(), configDir: d.configDir.trim() };
+      if (!entry.name || !entry.configDir) {
+        prov.error = "Enter a name and a config folder.";
+        return renderMenu();
+      }
+      if (await saveProviders({ add: entry })) {
+        d.name = "";
+        d.configDir = "";
+        renderMenu();
+      }
+    });
   }
 
   function initPicker() {
@@ -1041,8 +1392,8 @@
         $("input").focus();
       } else if (e.key === "Tab" && AGENTS.length > 1) {
         e.preventDefault();
-        const i = AGENTS.findIndex((a) => a.kind === picker.view);
-        picker.view = AGENTS[(i + (e.shiftKey ? -1 : 1) + AGENTS.length) % AGENTS.length].kind;
+        const i = AGENTS.findIndex((a) => a.id === picker.view);
+        picker.view = AGENTS[(i + (e.shiftKey ? -1 : 1) + AGENTS.length) % AGENTS.length].id;
         picker.active = 0;
         renderMenu();
       } else if (/^[1-9]$/.test(e.key) && !picker.query) {
@@ -1066,7 +1417,7 @@
   function onAgent(ev) {
     if (ev.kind === "start") {
       setBusy(true);
-      $("log").hidden = false;
+      setLogOpen(true);
     }
     addLog(ev);
     if (ev.kind === "done") setBusy(false);
@@ -1079,6 +1430,11 @@
       body: JSON.stringify(body || {}),
     });
     const data = await res.json().catch(() => ({}));
+    if (res.status === 403 && data.error === "Bad token") {
+      // The server restarted since this page loaded; a reload picks up the new token.
+      location.reload();
+      throw new Error("The server restarted. Reloading…");
+    }
     if (!res.ok) throw new Error(data.error || res.statusText);
     return data;
   }
@@ -1099,7 +1455,7 @@
       input.value = "";
       autosize();
     } catch (err) {
-      $("log").hidden = false;
+      setLogOpen(true);
       addLog({ kind: "error", text: err.message });
     }
   }
@@ -1129,6 +1485,17 @@
   function init() {
     state.size = clampSize(Number(state.size) || ZOOM_DEFAULT);
     initTheme();
+    initFrameMenu();
+    $("exportBtn").addEventListener("click", () => {
+      openPicker(null);
+      window.__protodeckExport.open({
+        screens: state.screens,
+        selectedRoutes: visibleScreens().map((s) => s.path),
+        devices: DEVICES,
+        selectedDevices: DEVICES.filter((d) => state.enabled.has(d.id)).map((d) => d.id),
+        theme: currentTheme(),
+      });
+    });
     initCanvas();
     initPickers();
 
@@ -1153,12 +1520,12 @@
       $("pick").addEventListener("click", () => setPicking(!state.picking));
       $("clearElement").addEventListener("click", clearSelection);
       $("stop").addEventListener("click", () => api("stop").catch(() => {}));
-      $("toggleLog").addEventListener("click", () => ($("log").hidden = !$("log").hidden));
+      $("toggleLog").addEventListener("click", () => setLogOpen($("log").hidden));
       $("newChat").addEventListener("click", async () => {
         try {
           await api("reset");
           $("log").textContent = "";
-          $("log").hidden = true;
+          setLogOpen(false);
           $("toggleLog").hidden = true;
         } catch (err) {
           addLog({ kind: "error", text: err.message });

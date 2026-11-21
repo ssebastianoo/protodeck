@@ -16,13 +16,18 @@ export interface ModelInfo {
 }
 
 export interface AgentInfo {
+  /** Unique key: the kind for the built-in agents, `<kind>:<name>` for providers from the config file. */
+  id: string;
   kind: AgentKind;
   label: string;
   models: ModelInfo[];
+  /** Set for providers from `.protodeck/config.json`. */
+  provider?: { name: string; configDir: string };
 }
 
 export interface AgentChoice {
-  agent: AgentKind;
+  /** An AgentInfo id. */
+  agent: string;
   model?: string;
   effort?: string;
 }
@@ -43,6 +48,8 @@ export interface ChatContext {
 export interface AgentOptions {
   /** Agents the user can pick from in the gallery. Empty turns chat off. */
   agents: AgentInfo[];
+  /** Absolute config folders of provider agents, by agent id. Never sent to the browser as env. */
+  dirs?: Record<string, string>;
   /** Command template for `custom`, e.g. `aider --message {prompt}`. */
   command?: string;
   /** Extra args appended to the claude/codex command line. */
@@ -62,6 +69,7 @@ const CLAUDE_EFFORTS = ["low", "medium", "high", "xhigh", "max"];
 function claudeAgent(): AgentInfo {
   const m = (id: string, label: string): ModelInfo => ({ id, label, efforts: CLAUDE_EFFORTS });
   return {
+    id: "claude",
     kind: "claude",
     label: "Claude Code",
     models: [m("", "Default"), m("opus", "Opus"), m("sonnet", "Sonnet"), m("haiku", "Haiku"), m("fable", "Fable")],
@@ -86,8 +94,27 @@ export function codexModels(home = process.env.CODEX_HOME || join(homedir(), ".c
   return models;
 }
 
-function codexAgent(): AgentInfo {
-  return { kind: "codex", label: "Codex", models: codexModels() };
+function codexAgent(home?: string): AgentInfo {
+  return { id: "codex", kind: "codex", label: "Codex", models: codexModels(home) };
+}
+
+/** Env var that points each agent at another config folder, i.e. another account. */
+export const CONFIG_ENV: Record<"claude" | "codex", string> = { claude: "CLAUDE_CONFIG_DIR", codex: "CODEX_HOME" };
+
+/** Turns config-file providers into agents. `dir` is the expanded config folder. */
+export function providerAgents(providers: { name: string; agent: "claude" | "codex"; configDir: string; dir: string }[]): {
+  agents: AgentInfo[];
+  dirs: Record<string, string>;
+} {
+  const agents: AgentInfo[] = [];
+  const dirs: Record<string, string> = {};
+  for (const p of providers) {
+    const base = p.agent === "claude" ? claudeAgent() : codexAgent(p.dir);
+    const id = `${p.agent}:${p.name}`;
+    agents.push({ ...base, id, label: p.name, provider: { name: p.name, configDir: p.configDir } });
+    dirs[id] = p.dir;
+  }
+  return { agents, dirs };
 }
 
 /**
@@ -100,7 +127,7 @@ export function discoverAgents(preferred?: string): { agents: AgentInfo[]; comma
   let command: string | undefined;
   if (preferred && preferred !== "claude" && preferred !== "codex") {
     command = preferred;
-    agents.push({ kind: "custom", label: splitArgs(preferred)[0] ?? "Custom", models: [{ id: "", label: "Default", efforts: [] }] });
+    agents.push({ id: "custom", kind: "custom", label: splitArgs(preferred)[0] ?? "Custom", models: [{ id: "", label: "Default", efforts: [] }] });
   }
   const claude = preferred === "claude" || hasCommand("claude");
   const codex = preferred === "codex" || hasCommand("codex");
@@ -157,8 +184,8 @@ function describeTool(name: string, input: Record<string, unknown> | undefined):
 export class AgentRunner {
   private child: ChildProcess | null = null;
   private sessionId: string | null = null;
-  /** Agent of the current conversation; switching agents starts a new one. */
-  private sessionKind: AgentKind | null = null;
+  /** Agent id of the current conversation; switching agents (or accounts) starts a new one. */
+  private sessionAgent: string | null = null;
   private runningKind: AgentKind | null = null;
   readonly history: AgentEvent[] = [];
 
@@ -168,13 +195,19 @@ export class AgentRunner {
     return this.opts.agents;
   }
 
+  /** Replaces the agent list, e.g. after the config file changed. */
+  setAgents(agents: AgentInfo[], dirs: Record<string, string>): void {
+    this.opts.agents = agents;
+    this.opts.dirs = dirs;
+  }
+
   get busy(): boolean {
     return this.child !== null;
   }
 
   reset(): void {
     this.sessionId = null;
-    this.sessionKind = null;
+    this.sessionAgent = null;
     this.history.length = 0;
   }
 
@@ -197,19 +230,20 @@ export class AgentRunner {
   }
 
   /** Checks a choice from the browser against the discovered agents, so only known values reach argv. */
-  resolve(choice: Partial<AgentChoice> | undefined): Required<AgentChoice> {
-    const agent = this.opts.agents.find((a) => a.kind === choice?.agent) ?? this.opts.agents[0];
-    if (!agent) throw new Error("No agent configured");
+  resolve(choice: Partial<AgentChoice> | undefined): Required<AgentChoice> & { info: AgentInfo } {
+    // An unknown id means the provider was renamed or removed: don't quietly run another account.
+    const agent = choice?.agent ? this.opts.agents.find((a) => a.id === choice.agent) : this.opts.agents[0];
+    if (!agent) throw new Error(choice?.agent ? `${choice.agent.replace(/^\w+:/, "")} is no longer in the provider list. Pick another agent.` : "No agent configured");
     const model = agent.models.find((m) => m.id === (choice?.model ?? ""));
     if (!model) throw new Error(`Unknown model for ${agent.label}: ${choice?.model}`);
     const effort = choice?.effort ?? "";
     if (effort && !model.efforts.includes(effort)) throw new Error(`${model.label} does not support reasoning level ${effort}`);
-    return { agent: agent.kind, model: model.id, effort };
+    return { agent: agent.id, model: model.id, effort, info: agent };
   }
 
-  private command(prompt: string, c: Required<AgentChoice>): { cmd: string; args: string[] } {
+  private command(prompt: string, c: Required<AgentChoice> & { info: AgentInfo }): { cmd: string; args: string[] } {
     const extra = this.opts.extraArgs ?? [];
-    switch (c.agent) {
+    switch (c.info.kind) {
       case "claude": {
         const args = ["-p", prompt, "--output-format", "stream-json", "--verbose", "--permission-mode", "acceptEdits"];
         if (this.sessionId) args.push("--resume", this.sessionId);
@@ -242,11 +276,13 @@ export class AgentRunner {
   run(ctx: ChatContext, choice?: Partial<AgentChoice>): void {
     if (this.child) throw new Error("The agent is still working on the previous instruction");
     const c = this.resolve(choice);
-    if (this.sessionKind !== c.agent) {
+    // A session lives in one config folder, so a provider pointed at a new folder starts fresh.
+    const sessionKey = `${c.agent}\0${this.opts.dirs?.[c.agent] ?? ""}`;
+    if (this.sessionAgent !== sessionKey) {
       this.sessionId = null;
-      this.sessionKind = c.agent;
+      this.sessionAgent = sessionKey;
     }
-    this.runningKind = c.agent;
+    this.runningKind = c.info.kind;
     const prompt = buildPrompt(ctx, this.opts.protoRel);
     const { cmd, args } = this.command(prompt, c);
     this.push({ kind: "start", text: ctx.message });
@@ -255,7 +291,7 @@ export class AgentRunner {
       cwd: this.opts.cwd,
       stdio: ["ignore", "pipe", "pipe"],
       detached: process.platform !== "win32",
-      env: { ...process.env, PROTODECK: "1" },
+      env: this.env(c.info),
     });
     this.child = child;
 
@@ -287,6 +323,13 @@ export class AgentRunner {
         this.push({ kind: "done" });
       } else this.push({ kind: "done" });
     });
+  }
+
+  private env(agent: AgentInfo): NodeJS.ProcessEnv {
+    const env: NodeJS.ProcessEnv = { ...process.env, PROTODECK: "1" };
+    const dir = this.opts.dirs?.[agent.id];
+    if (dir && agent.kind !== "custom") env[CONFIG_ENV[agent.kind]] = dir;
+    return env;
   }
 
   stop(): void {

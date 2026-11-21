@@ -1,5 +1,5 @@
 ---
-name: prototype
+name: protodeck
 description: Build UI design prototypes as plain HTML screens in a protodeck/ folder, outside the app code, and preview them in device frames with protodeck. Use when asked to prototype, mock up, sketch or explore the design of screens, flows or components.
 ---
 
@@ -45,6 +45,19 @@ No `<script src=...tailwind...>`, no `<link>` to fonts or CDNs, no build step, n
 
 Put design tokens in `protodeck/theme.css` as Tailwind v4 theme CSS, for example `@theme { --color-brand: #4f46e5; }`, then use `bg-brand`.
 
+## Providers (agent accounts)
+
+If the user asks to add another Claude Code or Codex account or config folder for protodeck's chat bar, ask whether it should apply to this project only or to all projects, then edit the matching file:
+
+- This project: `.protodeck/config.json` next to the `protodeck/` folder. It takes precedence when it exists.
+- All projects: `~/.protodeck/config.json` (`%USERPROFILE%\.protodeck\config.json` on Windows). It is used only when the project has no file of its own.
+
+```json
+{ "providers": [{ "name": "Work", "agent": "claude", "configDir": "~/.claude-work" }] }
+```
+
+`agent` is `claude` (run with `CLAUDE_CONFIG_DIR`) or `codex` (run with `CODEX_HOME`). Keep any other keys in the file. A running server picks up the change without a restart. Users can do the same from the gear in the gallery's agent selector.
+
 ## Components
 
 `protodeck/components/<name>.html` is used as `<x-<name>>` in any screen or other component. Do not import components.
@@ -71,6 +84,14 @@ npx protodeck
 ```
 
 (`bunx protodeck` works too.) It prints a URL, by default http://127.0.0.1:4321/. Tell the user to open it: every screen is shown side by side in MacBook, iPhone and Samsung frames, with a chat bar at the bottom that sends instructions back to an agent. If the server is already running, do not start a second one: saving files is enough. Run `npx protodeck init` first if `protodeck/` does not exist yet.
+
+## Ending your reply
+
+Make the protodeck URL the very last thing in your final message, after the summary of what you changed, so the user can click straight through. Use the URL the server actually printed (the port can differ from 4321) and put it on its own line as a short, clean call to action. Add the screen's path when one screen is the point of the change, and never wrap the URL in a code block or backticks, so it stays clickable. For example:
+
+**Open protodeck →** http://127.0.0.1:4321/
+
+Skip this when the request came from the protodeck chat bar, because the user is already looking at it.
 
 ## Working style
 
