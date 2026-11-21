@@ -66,12 +66,13 @@ test("splitArgs and prompt", () => {
 test("agent choices are checked against the discovered models", async () => {
   const { AgentRunner } = await import("../dist/agent.js");
   const agents = [
-    { kind: "claude", label: "Claude Code", models: [{ id: "", label: "Default", efforts: ["low", "high"] }, { id: "opus", label: "Opus", efforts: ["low", "high"] }] },
-    { kind: "codex", label: "Codex", models: [{ id: "", label: "Default", efforts: [] }] },
+    { id: "claude", kind: "claude", label: "Claude Code", models: [{ id: "", label: "Default", efforts: ["low", "high"] }, { id: "opus", label: "Opus", efforts: ["low", "high"] }] },
+    { id: "codex", kind: "codex", label: "Codex", models: [{ id: "", label: "Default", efforts: [] }] },
   ];
   const r = new AgentRunner({ agents, cwd: ".", protoRel: "protodeck" }, () => {});
-  assert.deepEqual(r.resolve(undefined), { agent: "claude", model: "", effort: "" });
-  assert.deepEqual(r.resolve({ agent: "claude", model: "opus", effort: "high" }), { agent: "claude", model: "opus", effort: "high" });
+  const plain = ({ info, ...c }) => c;
+  assert.deepEqual(plain(r.resolve(undefined)), { agent: "claude", model: "", effort: "" });
+  assert.deepEqual(plain(r.resolve({ agent: "claude", model: "opus", effort: "high" })), { agent: "claude", model: "opus", effort: "high" });
   assert.throws(() => r.resolve({ agent: "claude", model: "--dangerous" }), /Unknown model/);
   assert.throws(() => r.resolve({ agent: "codex", effort: "high" }), /does not support/);
 });

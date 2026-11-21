@@ -21,6 +21,8 @@ Options
                         (default: claude if installed, else codex). Installed agents and their
                         models can be switched from the chat bar.
   --agent-args <args>   Extra arguments for claude/codex, e.g. "--max-turns 20"
+                        More accounts (e.g. a second Claude config folder) are set from the gear in the
+                        agent selector and saved in .protodeck/config.json or ~/.protodeck/config.json.
   -o, --open            Open the browser
   -v, --version         Print the version
   -h, --help            Show this help
@@ -134,7 +136,8 @@ async function serve(a: Args): Promise<void> {
     console.error(`protodeck: ${relative(process.cwd(), root) || root} does not exist. Run \`npx protodeck init\` to create it.`);
     process.exit(1);
   }
-  const { agents, command } = discoverAgents(a.agent ?? process.env.PROTODECK_AGENT);
+  const preferred = a.agent ?? process.env.PROTODECK_AGENT;
+  const { agents, command } = discoverAgents(preferred);
   // The agent works from the folder that contains the prototype folder (usually the project root).
   const cwd = dirname(root);
   const server = new ProtoServer({
@@ -142,6 +145,7 @@ async function serve(a: Args): Promise<void> {
     port: a.port,
     host: a.host,
     agent: { agents, command, extraArgs: a.agentArgs ? splitArgs(a.agentArgs) : [], cwd, protoRel: relative(cwd, root) },
+    providers: preferred !== "none",
   });
   const port = await server.listen();
   const unregister = register({ pid: process.pid, port, host: a.host, root, startedAt: Date.now() });
@@ -149,7 +153,7 @@ async function serve(a: Args): Promise<void> {
   const url = `http://${a.host === "0.0.0.0" || a.host === "::" ? "localhost" : a.host}:${port}/`;
   console.log(`\n  protodeck ${VERSION}`);
   console.log(`  ➜ ${url}`);
-  console.log(`  serving ${relative(process.cwd(), root) || "."} · agents: ${agents.map((x) => x.label).join(", ") || "none"}\n`);
+  console.log(`  serving ${relative(process.cwd(), root) || "."} · agents: ${server.agents.map((x) => x.label).join(", ") || "none"}\n`);
   if (a.open) openBrowser(url);
   const shutdown = () => {
     server.close();

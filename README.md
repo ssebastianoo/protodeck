@@ -39,10 +39,11 @@ Use it in a screen as `<x-card title="Plan">…</x-card>` or `<x-card />`. Attri
 
 ## Gallery
 
-- **Move around:** scroll or swipe with two fingers to pan, drag the background, or hold Space and drag. Arrow keys pan too (Shift for bigger steps).
+- **Move around:** scroll or swipe with two fingers to pan, drag the background, or hold Space and drag. Arrow keys pan too (Shift for bigger steps). The canvas has no edges; Shift+1 jumps back to the screens.
 - **Zoom:** pinch, Ctrl/⌘ + scroll, ⌘ + `+`/`-`, or the slider. ⌘ + `0` resets.
 - **Devices:** pick frames from the Devices menu, or add your own width and height with "Add custom size…". Custom sizes are saved in the browser.
 - **View:** show or hide the components section (hidden by default) and switch between same-height and true relative frame sizes.
+- **Export:** the Export button at the top right saves screens as PNG images (one per route and device, at 1×–3×, optionally full page height) or as self-contained HTML pages (one per route, with the compiled CSS, font and images inlined). Routes and devices start from what the canvas shows. Several files are saved as one .zip.
 - **Light and dark:** the button at the top right switches the gallery and the previews. Screens follow it through Tailwind's `dark:` variant (a `data-protodeck-theme` attribute on `<html>`). Screens that use `dark:` classes also get the native dark color scheme for form controls and scrollbars.
 
 ## Chat bar
@@ -65,6 +66,30 @@ Pick the agent, model and reasoning level from the selector in the bar. It lists
 
 `--agent` sets which agent is selected by default.
 Pass extra flags with `--agent-args "--max-turns 20"`.
+
+### Providers: more accounts
+
+Use the gear at the bottom of the agent list to add a provider: another Claude Code or Codex account, kept in its own config folder. For example, a "Work" provider with `~/.claude-work` runs `claude` with `CLAUDE_CONFIG_DIR=~/.claude-work`, and Codex providers get `CODEX_HOME`. Sign in to the account once from a terminal with `CLAUDE_CONFIG_DIR=~/.claude-work claude` or `CODEX_HOME=~/.codex-work codex login`. Providers show up in the selector next to the default agents, marked with their first letter.
+
+The first time you add one, protodeck asks where to save it:
+
+| Scope | File |
+| --- | --- |
+| This project | `.protodeck/config.json` next to the `protodeck/` folder |
+| Global | `~/.protodeck/config.json` (`%USERPROFILE%\.protodeck\config.json` on Windows) |
+
+protodeck reads the project file first and falls back to the global one only when the project has none. The file is reread on every page load and message, so you or your agent can edit it by hand while the server runs:
+
+```json
+{
+  "providers": [
+    { "name": "Work", "agent": "claude", "configDir": "~/.claude-work" },
+    { "name": "Side", "agent": "codex", "configDir": "~/.codex-side" }
+  ]
+}
+```
+
+`agent` is `claude` or `codex`. `configDir` accepts `~`, and relative paths resolve against the project (or the home folder for the global file). The project file holds personal paths, so you may want to add `.protodeck/` to `.gitignore`.
 
 ## CLI
 

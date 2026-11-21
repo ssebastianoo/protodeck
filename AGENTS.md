@@ -8,8 +8,10 @@ protodeck is an npm package (run with `npx`/`bunx protodeck`). It serves HTML pr
 - `src/server.ts`: HTTP server. It serves the gallery (`/`), screens and static files, internal routes under `/__protodeck/`, SSE live reload, and the chat endpoints.
 - `src/render.ts`: `<x-name>` component expansion and `<head>` injection. Pure functions, with no file system access.
 - `src/agent.ts`: builds the prompt, spawns claude, codex or a custom command, and parses their output into events.
+- `src/config.ts`: `.protodeck/config.json` providers (extra claude/codex accounts, run with `CLAUDE_CONFIG_DIR`/`CODEX_HOME`). The project file wins over the global `~/.protodeck/config.json`. The server rereads it on each gallery load and chat message.
 - `ui/`: browser code, plain JS and CSS with no build step.
   - `gallery.html`, `gallery.js` and `gallery.css` make up the gallery page.
+  - `export.js` is the Export dialog. It renders screens in hidden frames, snapshots PNGs through an SVG `foreignObject`, builds standalone HTML, and writes the .zip itself (no dependencies).
   - `client.js` is injected into every screen and handles reload, scroll restore and the element picker.
   - `base.css` is the reset.
 - `skill/SKILL.md`: the skill installed into users' projects.
@@ -38,7 +40,7 @@ Manual check: `node dist/cli.js init` and then `node dist/cli.js --agent none` i
   - Keep the path traversal check on file serving.
   - The default bind address stays `127.0.0.1`.
 - **Gallery frames do not open their own SSE connection.** Browsers cap HTTP/1.1 connections per host, so `client.js` connects only when it is not inside the gallery, and the gallery reloads its iframes itself. Keep it that way.
-- **Gallery ↔ frame communication uses `postMessage`** with `protodeck:*` message types (`ready`, `focus`, `pick`, `picked`, `highlight`, `refresh`, `cancel`, `theme`, plus `zoom`, `key` and `gesture`, which client.js forwards so canvas zoom works over frames). Update both `gallery.js` and `client.js` when changing a message.
+- **Gallery ↔ frame communication uses `postMessage`** with `protodeck:*` message types (`ready`, `focus`, `pick`, `picked`, `highlight`, `refresh`, `cancel`, `theme`, `contextmenu`, plus `zoom`, `key` and `gesture`, which client.js forwards so canvas zoom works over frames). Update both `gallery.js` and `client.js` when changing a message.
 - **Component markers:** expanded components are wrapped in `<!--x:name-->…<!--/x:name-->`. The picker uses them to tell the agent which component file renders an element, so keep them if you change the expansion.
 - **Agent output formats:** `claude` uses `--output-format stream-json`, and the session id is kept for `--resume`. `codex exec --json` handles both the current `item.*` events and the older `msg` events. Check the CLIs' current output before changing these parsers.
 - Device definitions are the `DEVICES` list in `ui/gallery.js`.

@@ -5,13 +5,17 @@ import { join, resolve, sep, extname, relative } from "node:path";
 import { randomBytes } from "node:crypto";
 import { BINARY, TEXT, VERSION } from "./assets.generated.js";
 import { renderPage } from "./render.js";
-import { AgentRunner, type AgentChoice, type AgentEvent, type AgentOptions, type ChatContext } from "./agent.js";
+import { AgentRunner, providerAgents, type AgentChoice, type AgentEvent, type AgentInfo, type AgentOptions, type ChatContext } from "./agent.js";
+import { activeProviders, loadConfig, saveProviders, type ConfigState } from "./config.js";
 
 export interface ServerOptions {
   root: string; // absolute prototype folder
   port: number;
   host: string;
+  /** `agent.agents` holds the built-in agents; providers from `.protodeck/config.json` are added after them. */
   agent: AgentOptions;
+  /** False with `--agent none`: chat stays off even if the config file lists providers. */
+  providers?: boolean;
 }
 
 const MIME: Record<string, string> = {
@@ -105,14 +109,20 @@ export class ProtoServer {
   private watcher: FSWatcher | null = null;
   private clients = new Set<ServerResponse>();
   private token = randomBytes(16).toString("hex");
+  /** Identifies this server process, so a gallery left open across a restart knows its token is stale. Not secret. */
+  private instance = randomBytes(8).toString("hex");
   private agent: AgentRunner;
   private changeTimer: NodeJS.Timeout | null = null;
   private changed = new Set<string>();
+  private baseAgents: AgentInfo[];
+  private configError: string | undefined;
   port: number;
 
   constructor(private opts: ServerOptions) {
     this.port = opts.port;
-    this.agent = new AgentRunner(opts.agent, (e) => this.broadcast("agent", e));
+    this.baseAgents = opts.agent.agents;
+    this.agent = new AgentRunner({ ...opts.agent }, (e) => this.broadcast("agent", e));
+    this.refreshAgents();
     this.server = createServer((req, res) => {
       this.handle(req, res).catch((err) => {
         if (!res.headersSent) res.writeHead(500, { "content-type": "text/plain" });
@@ -145,6 +155,34 @@ export class ProtoServer {
       }
     }
     throw new Error("No free port found");
+  }
+
+  get agents(): AgentInfo[] {
+    return this.agent.agents;
+  }
+
+  /** Folder the agent runs in and the local config lives in: the one that contains the prototype folder. */
+  private get projectDir(): string {
+    return this.opts.agent.cwd;
+  }
+
+  /**
+   * Rereads the config (local file first, global as fallback) and rebuilds the agent list.
+   * Called on every gallery load and chat message, so edits to the file apply without a restart.
+   */
+  private refreshAgents(): ConfigState {
+    const config = loadConfig(this.projectDir);
+    const active = config.active ? config[config.active] : undefined;
+    if (active?.error && active.error !== this.configError) console.warn(`protodeck: ${active.error}`);
+    this.configError = active?.error;
+    const { agents, dirs } =
+      this.opts.providers === false ? { agents: [], dirs: {} } : providerAgents(activeProviders(config, this.projectDir));
+    this.agent.setAgents([...this.baseAgents, ...agents], dirs);
+    return config;
+  }
+
+  private configPayload(config: ConfigState) {
+    return { config, agents: this.agent.agents, providers: this.opts.providers !== false };
   }
 
   close(): void {
@@ -229,9 +267,10 @@ export class ProtoServer {
     if (path.startsWith("/__protodeck/")) return this.handleInternal(req, res, path.slice(13), url);
 
     if (path === "/") {
+      this.refreshAgents();
       const page = TEXT["gallery.html"]
         .replaceAll("%VERSION%", VERSION)
-        .replace("%BOOT%", JSON.stringify({ token: this.token, agents: this.agent.agents, version: VERSION }).replace(/</g, "\\u003c"));
+        .replace("%BOOT%", JSON.stringify({ token: this.token, instance: this.instance, agents: this.agent.agents, providers: this.opts.providers !== false, version: VERSION }).replace(/</g, "\\u003c"));
       return this.send(res, 200, MIME[".html"], page);
     }
 
@@ -256,7 +295,20 @@ export class ProtoServer {
   private async handleInternal(req: IncomingMessage, res: ServerResponse, name: string, url: URL): Promise<void> {
     if (req.method === "POST") {
       if (req.headers["x-protodeck-token"] !== this.token) return this.json(res, 403, { error: "Bad token" });
+      if (name === "config") {
+        const body = await this.readBody(req);
+        if (body.scope !== "local" && body.scope !== "global") return this.json(res, 400, { error: "scope must be local or global" });
+        try {
+          saveProviders(body.scope, this.projectDir, body.providers);
+        } catch (e: any) {
+          return this.json(res, 400, { error: e.message });
+        }
+        const payload = this.configPayload(this.refreshAgents());
+        this.broadcast("agents", { agents: payload.agents });
+        return this.json(res, 200, payload);
+      }
       if (name === "chat") {
+        if (!this.agent.busy) this.refreshAgents();
         if (!this.agent.agents.length) return this.json(res, 400, { error: "No agent configured. Restart with --agent claude|codex|\"<command>\"" });
         if (this.agent.busy) return this.json(res, 409, { error: "The agent is still working" });
         const body = (await this.readBody(req)) as ChatContext & { agent?: AgentChoice };
@@ -283,7 +335,7 @@ export class ProtoServer {
     switch (name) {
       case "events": {
         res.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-store", connection: "keep-alive" });
-        res.write(`retry: 1000\nevent: hello\ndata: ${JSON.stringify({ version: VERSION })}\n\n`);
+        res.write(`retry: 1000\nevent: hello\ndata: ${JSON.stringify({ version: VERSION, instance: this.instance })}\n\n`);
         this.clients.add(res);
         const ping = setInterval(() => res.write(": ping\n\n"), 25000);
         req.on("close", () => {
@@ -292,6 +344,8 @@ export class ProtoServer {
         });
         return;
       }
+      case "config":
+        return this.json(res, 200, this.configPayload(this.refreshAgents()));
       case "state":
         return this.json(res, 200, {
           screens: listScreens(this.opts.root),
@@ -311,6 +365,7 @@ export class ProtoServer {
       case "tailwind.js":
       case "client.js":
       case "gallery.js":
+      case "export.js":
       case "gallery.css":
         return this.send(res, 200, MIME[extname(name)], TEXT[name], name === "tailwind.js");
       case "inter-latin.woff2":
